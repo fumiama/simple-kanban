@@ -153,7 +153,7 @@ int sm1_pwd(THREADTIMER *timer) {
 
 int s0_init(THREADTIMER *timer) {
     if(!strcmp("get", timer->data)) timer->status = 1;
-    else if(!strcmp("set", timer->data)) timer->status = 2;
+    else if(!strcmp("set" SETPASS, timer->data)) timer->status = 2;
     else if(!strcmp("cat", timer->data)) return sendAll(data_path, timer);
     else if(!strcmp("quit", timer->data)) return 0;
     return sendData(timer->accept_fd, timer->data, timer->numbytes);
@@ -180,9 +180,9 @@ int s1_get(THREADTIMER *timer) {        //get kanban
 
 int s2_set(THREADTIMER *timer) {
     FILE *fp = NULL;
-    if(!strcmp(timer->data, "ver" SETPASS)) {
+    if(!strcmp(timer->data, "ver")) {
         fp = openFile(kanban_path, LOCK_EX, "wb");
-    } else if(!strcmp(timer->data, "dat" SETPASS)) {
+    } else if(!strcmp(timer->data, "dat")) {
         fp = openFile(data_path, LOCK_EX, "wb");
     }
     if(fp) {
