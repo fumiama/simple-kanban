@@ -222,7 +222,7 @@ int s3_setData(THREADTIMER *timer) {
             puts("Set data error.");
             return closeFileAndSend(timer, "erro", 4);
         }
-        int32_t remain = file_size - BUFSIZ;
+        int32_t remain = file_size - timer->numbytes;
         while(remain > 0) {
             printf("remain:%d\n", remain);
             timer->numbytes = recv(timer->accept_fd, timer->data, BUFSIZ, 0);
