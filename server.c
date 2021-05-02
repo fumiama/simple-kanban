@@ -78,10 +78,6 @@ int bindServer(uint16_t port, u_int try_times) {
     bzero(&(server_addr.sin_zero), 8);
     
     fd = socket(AF_INET, SOCK_STREAM, 0);
-    #if !__APPLE__
-        int reuse = 1;
-        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-    #endif
     while(!~(result = bind(fd, (struct sockaddr *)&server_addr, struct_len)) && fail_count++ < try_times) sleep(1);
     if(!~result && fail_count >= try_times) {
         puts("Bind server failure!");
@@ -140,7 +136,7 @@ int sendAll(char* file_path, THREADTIMER *timer) {
             hdtr.hdr_cnt = 1;
             sendfile(fileno(fp), timer->accept_fd, 0, &len, &hdtr, 0);
         #else
-            send(timer->accept_fd, &file_size, sizeof(uint32_t), 0);
+            //send(timer->accept_fd, &file_size, sizeof(uint32_t), 0);
             sendfile(timer->accept_fd, fileno(fp), &len, file_size);
         #endif
         printf("Send %lld bytes.\n", len);

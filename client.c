@@ -47,10 +47,6 @@ int main(int argc,char *argv[]) {   //usage: ./client host port
     ssize_t numbytes;
     puts("break!");
     while((sockfd = socket(AF_INET,SOCK_STREAM,0)) == -1);
-    #if !__APPLE__
-        int reuse = 1;
-        setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-    #endif
     puts("Get sockfd");
     their_addr.sin_family = AF_INET;
     their_addr.sin_port = htons(atoi(argv[2]));
