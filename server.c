@@ -379,7 +379,7 @@ void closeFile(FILE *fp) {
 }
 
 int main(int argc, char *argv[]) {
-    if(argc != 7 && argc != 8) showUsage(argv[0]);
+    if(argc != 5 && argc != 6) showUsage(argv[0]);
     else {
         int port = 0;
         int as_daemon = !strcmp("-d", argv[1]);
