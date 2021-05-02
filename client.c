@@ -47,6 +47,10 @@ int main(int argc,char *argv[]) {   //usage: ./client host port
     ssize_t numbytes;
     puts("break!");
     while((sockfd = socket(AF_INET,SOCK_STREAM,0)) == -1);
+    #if !__APPLE__
+        int reuse = 1;
+        setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    #endif
     puts("Get sockfd");
     their_addr.sin_family = AF_INET;
     their_addr.sin_port = htons(atoi(argv[2]));
@@ -84,7 +88,7 @@ int main(int argc,char *argv[]) {   //usage: ./client host port
                         else puts("Send file error.");
                     #else
                         send(sockfd, &file_size, sizeof(uint32_t), 0);
-                        if(!sendfile(sockfd, fileno(fp), &len, htonl(file_size))) puts("Send file success.");
+                        if(!sendfile(sockfd, fileno(fp), &len, file_size)) puts("Send file success.");
                         else puts("Send file error.");
                     #endif
                     fclose(fp);
