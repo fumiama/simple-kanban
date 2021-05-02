@@ -13,8 +13,11 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <time.h>
+
 #if !__APPLE__
-    #include <sys/sendfile.h>    
+    #include <sys/sendfile.h> 
+#else
+    struct sf_hdtr hdtr; 
 #endif
 
 #define PASSWORD "fumiama"
@@ -24,7 +27,6 @@
 int fd;
 socklen_t struct_len = sizeof(struct sockaddr_in);
 struct sockaddr_in server_addr;
-struct sf_hdtr hdtr;
 
 char *data_path;
 char *kanban_path;

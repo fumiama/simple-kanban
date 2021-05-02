@@ -9,8 +9,11 @@
 #include <arpa/inet.h>
 #include <sys/stat.h>
 #include <pthread.h>
+
 #if !__APPLE__
-    #include <sys/sendfile.h>
+    #include <sys/sendfile.h> 
+#else
+    struct sf_hdtr hdtr; 
 #endif
 
 int sockfd;
@@ -18,7 +21,6 @@ char buf[BUFSIZ];
 char bufr[BUFSIZ];
 struct sockaddr_in their_addr;
 pthread_t thread;
-struct sf_hdtr hdtr;
 uint32_t file_size;
 int recv_bin = 0;
 
