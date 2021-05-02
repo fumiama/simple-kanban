@@ -9,6 +9,9 @@
 #include <arpa/inet.h>
 #include <sys/stat.h>
 #include <pthread.h>
+#if !__APPLE__
+    #include <sys/sendfile.h>
+#endif
 
 int sockfd;
 char buf[BUFSIZ];
@@ -68,16 +71,22 @@ int main(int argc,char *argv[]) {   //usage: ./client host port
                 fp = fopen(buf, "rb");
                 if(fp) {
                     off_t len;
-                    struct iovec headers;
-                    headers.iov_base = &file_size;
-                    headers.iov_len = sizeof(uint32_t);
-                    hdtr.headers = &headers;
-                    hdtr.hdr_cnt = 1;
                     file_size = (uint32_t)fileSize(buf);
-                    if(!sendfile(fileno(fp), sockfd, 0, &len, &hdtr, 0)) puts("Send file success.");
-                    else puts("Send file error.");
-                    printf("Send count:%lld\n", len);
+                    #if __APPLE__
+                        struct iovec headers;
+                        headers.iov_base = &file_size;
+                        headers.iov_len = sizeof(uint32_t);
+                        hdtr.headers = &headers;
+                        hdtr.hdr_cnt = 1;
+                        if(!sendfile(fileno(fp), sockfd, 0, &len, &hdtr, 0)) puts("Send file success.");
+                        else puts("Send file error.");
+                    #else
+                        send(timer->accept_fd, &file_size, sizeof(uint32_t), 0);
+                        if(!sendfile(fileno(fp), sockfd, &len, file_size)) puts("Send file success.");
+                        else puts("Send file error.");
+                    #endif
                     fclose(fp);
+                    printf("Send count:%lld\n", len);
                 } else puts("Open file error!");
             } else send(sockfd, buf, strlen(buf), 0);
             sleep(1);

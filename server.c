@@ -13,6 +13,9 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <time.h>
+#if !__APPLE__
+    #include <sys/sendfile.h>    
+#endif
 
 #define PASSWORD "fumiama"
 
@@ -120,14 +123,19 @@ int sendAll(char* file_path, THREADTIMER *timer) {
     if(fp) {
         timer->fp = fp;
         timer->is_open = 1;
-        struct iovec headers;
         uint32_t file_size = (uint32_t)fileSize(file_path);
         off_t len;
-        headers.iov_base = &file_size;
-        headers.iov_len = sizeof(uint32_t);
-        hdtr.headers = &headers;
-        hdtr.hdr_cnt = 1;
-        sendfile(fileno(fp), timer->accept_fd, 0, &len, &hdtr, 0);
+        #if __APPLE__
+            struct iovec headers;
+            headers.iov_base = &file_size;
+            headers.iov_len = sizeof(uint32_t);
+            hdtr.headers = &headers;
+            hdtr.hdr_cnt = 1;
+            sendfile(fileno(fp), timer->accept_fd, 0, &len, &hdtr, 0);
+        #else
+            send(timer->accept_fd, &file_size, sizeof(uint32_t), 0);
+            sendfile(fileno(fp), timer->accept_fd, &len, file_size);
+        #endif
         printf("Send %lld bytes.", len);
         closeFile(fp);
         timer->is_open = 0;
