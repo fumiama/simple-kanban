@@ -72,7 +72,7 @@ int main(int argc,char *argv[]) {   //usage: ./client host port
                 FILE *fp = NULL;
                 fp = fopen(buf, "rb");
                 if(fp) {
-                    off_t len;
+                    off_t len = 0;
                     file_size = (uint32_t)fileSize(buf);
                     #if __APPLE__
                         struct iovec headers;

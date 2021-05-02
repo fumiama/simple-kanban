@@ -127,7 +127,7 @@ int sendAll(char* file_path, THREADTIMER *timer) {
         timer->is_open = 1;
         uint32_t file_size = (uint32_t)fileSize(file_path);
         printf("Get file size: %u bytes.\n", file_size);
-        off_t len;
+        off_t len = 0;
         #if __APPLE__
             struct iovec headers;
             headers.iov_base = &file_size;
@@ -136,7 +136,7 @@ int sendAll(char* file_path, THREADTIMER *timer) {
             hdtr.hdr_cnt = 1;
             sendfile(fileno(fp), timer->accept_fd, 0, &len, &hdtr, 0);
         #else
-            //send(timer->accept_fd, &file_size, sizeof(uint32_t), 0);
+            send(timer->accept_fd, &file_size, sizeof(uint32_t), 0);
             sendfile(timer->accept_fd, fileno(fp), &len, file_size);
         #endif
         printf("Send %lld bytes.\n", len);
