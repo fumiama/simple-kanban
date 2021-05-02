@@ -210,38 +210,29 @@ int s3_setData(THREADTIMER *timer) {
         }
     }
     if(file_size <= BUFSIZ - (is_first_data?0:sizeof(uint32_t))) {
+        while(timer->numbytes != file_size - (is_first_data?0:sizeof(uint32_t))) {
+            timer->numbytes += recv(timer->accept_fd, timer->data + timer->numbytes + (is_first_data?0:sizeof(uint32_t)), BUFSIZ - timer->numbytes - (is_first_data?0:sizeof(uint32_t)), 0);
+        }
         if(fwrite(timer->data + (is_first_data?0:sizeof(uint32_t)), file_size, 1, timer->fp) != 1) {
             puts("Set data error.");
             return closeFileAndSend(timer, "erro", 4);
         } else return closeFileAndSend(timer, "succ", 4);
     } else {
-        if(fwrite(timer->data + (is_first_data?0:sizeof(uint32_t)), BUFSIZ - (is_first_data?0:sizeof(uint32_t)), 1, timer->fp) != 1) {
+        if(fwrite(timer->data + (is_first_data?0:sizeof(uint32_t)), timer->numbytes - (is_first_data?0:sizeof(uint32_t)), 1, timer->fp) != 1) {
             puts("Set data error.");
             return closeFileAndSend(timer, "erro", 4);
         }
         int32_t remain = file_size - BUFSIZ;
-        while(remain / BUFSIZ > 0) {
+        while(remain > 0) {
             printf("remain:%d\n", remain);
             timer->numbytes = recv(timer->accept_fd, timer->data, BUFSIZ, 0);
-            if(timer->numbytes == BUFSIZ) {
-                if(fwrite(timer->data, BUFSIZ, 1, timer->fp) != 1) {
-                    puts("Set data error.");
-                    return closeFileAndSend(timer, "erro", 4);
-                }
-                remain -= BUFSIZ;
-            } else return closeFileAndSend(timer, "erro", 4);
-        }
-        if(remain > 0) {
-            printf("remain:%d\n", remain);
-            timer->numbytes = recv(timer->accept_fd, timer->data, remain, 0);
-            printf("Get data size: %tu\n", timer->numbytes);
-            if(timer->numbytes == remain) {
-                if(fwrite(timer->data, remain, 1, timer->fp) != 1) {
-                    puts("Set data error.");
-                    return closeFileAndSend(timer, "erro", 4);
-                } else return closeFileAndSend(timer, "succ", 4);
+            if(fwrite(timer->data, timer->numbytes, 1, timer->fp) != 1) {
+                puts("Set data error.");
+                return closeFileAndSend(timer, "erro", 4);
             }
+            remain -= timer->numbytes;
         }
+        return closeFileAndSend(timer, "succ", 4);
     }
     return closeFileAndSend(timer, "erro", 4);
 }
