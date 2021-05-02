@@ -84,7 +84,7 @@ int main(int argc,char *argv[]) {   //usage: ./client host port
                         else puts("Send file error.");
                     #else
                         send(sockfd, &file_size, sizeof(uint32_t), 0);
-                        if(!sendfile(sockfd, fileno(fp), &len, file_size)) puts("Send file success.");
+                        if(!sendfile(sockfd, fileno(fp), &len, htonl(file_size))) puts("Send file success.");
                         else puts("Send file error.");
                     #endif
                     fclose(fp);
