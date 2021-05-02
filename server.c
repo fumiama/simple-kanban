@@ -136,9 +136,9 @@ int sendAll(char* file_path, THREADTIMER *timer) {
             sendfile(fileno(fp), timer->accept_fd, 0, &len, &hdtr, 0);
         #else
             send(timer->accept_fd, &file_size, sizeof(uint32_t), 0);
-            sendfile(fileno(fp), timer->accept_fd, &len, file_size);
+            sendfile(timer->accept_fd, fileno(fp), &len, file_size);
         #endif
-        printf("Send %lld bytes.", len);
+        printf("Send %lld bytes.\n", len);
         closeFile(fp);
         timer->is_open = 0;
     }
