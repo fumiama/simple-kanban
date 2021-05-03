@@ -271,7 +271,7 @@ void acceptTimer(void *p) {
     while(*timer->thread && !pthread_kill(*timer->thread, 0)) {
         sleep(MAXWAITSEC);
         puts("Check accept status");
-        if(time(NULL) - timer->touch > MAXWAITSEC) {
+        if(*timer->thread && time(NULL) - timer->touch > MAXWAITSEC) {
             kill_thread(timer);
         }
     }
