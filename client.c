@@ -90,7 +90,10 @@ int main(int argc,char *argv[]) {   //usage: ./client host port
                     fclose(fp);
                     printf("Send count:%lld\n", len);
                 } else puts("Open file error!");
-            } else send(sockfd, buf, strlen(buf), 0);
+            } else {
+                send(sockfd, buf, strlen(buf), 0);
+                if(!strcmp(buf, "quit")) exit(EXIT_SUCCESS);
+            }
             sleep(1);
         }
     } else perror("Create msg thread failed");
