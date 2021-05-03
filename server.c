@@ -169,6 +169,7 @@ int s1_get(THREADTIMER *timer) {        //get kanban
             if(sscanf(timer->data, "%u", &cli_ver) > 0) {
                 if(cli_ver < ver) {     //need to send a new kanban
                     closeFile(fp);
+                    timer->is_open = 0;
                     return sendAll(kanban_path, timer);
                 }
             }
@@ -332,6 +333,8 @@ void acceptClient() {
                 timer->thread = &accept_threads[p];
                 timer->touch = time(NULL);
                 timer->data = NULL;
+                timer->is_open = 0;
+                timer->fp = NULL;
                 if (pthread_create(timer->thread, NULL, (void *)&handleAccept, timer)) puts("Error creating thread");
                 else puts("Creating thread succeeded");
             } else puts("Allocate timer error");
