@@ -50,17 +50,18 @@ void acceptClient();
 void acceptTimer(void *p);
 int bindServer(uint16_t port, u_int try_times);
 int checkBuffer(THREADTIMER *timer);
-int freeAfterSend(int accept_fd, char *data, size_t length);
 void closeFile(FILE *fp);
 int closeFileAndSend(THREADTIMER *timer, char *data, size_t numbytes);
 off_t fileSize(const char* fname);
-void handleAccept(void *accept_fd_p);
+int freeAfterSend(int accept_fd, char *data, size_t length);
+void handle_accept(void *accept_fd_p);
 void handle_pipe(int signo);
 void handle_quit(int signo);
+void kill_thread(THREADTIMER* timer);
 int listenSocket(u_int try_times);
 FILE *openFile(char* file_path, int lock_type, char* mode);
-int sendAll(char* file_path, THREADTIMER *timer);
-int sendData(int accept_fd, char *data, size_t length);
+int send_all(char* file_path, THREADTIMER *timer);
+int send_data(int accept_fd, char *data, size_t length);
 int sm1_pwd(THREADTIMER *timer);
 int s0_init(THREADTIMER *timer);
 int s1_get(THREADTIMER *timer);
@@ -100,12 +101,12 @@ int listenSocket(u_int try_times) {
 }
 
 int freeAfterSend(int accept_fd, char *data, size_t length) {
-    int re = sendData(accept_fd, data, length);
+    int re = send_data(accept_fd, data, length);
     free(data);\
     return re;
 }
 
-int sendData(int accept_fd, char *data, size_t length) {
+int send_data(int accept_fd, char *data, size_t length) {
     if(!~send(accept_fd, data, length, 0)) {
         puts("Send data error");
         return 0;
@@ -116,7 +117,7 @@ int sendData(int accept_fd, char *data, size_t length) {
     }
 }
 
-int sendAll(char* file_path, THREADTIMER *timer) {
+int send_all(char* file_path, THREADTIMER *timer) {
     int re = 1;
     FILE *fp = openFile(file_path, LOCK_SH, "rb");
     size_t numbytes;
@@ -153,9 +154,9 @@ int sm1_pwd(THREADTIMER *timer) {
 int s0_init(THREADTIMER *timer) {
     if(!strcmp("get", timer->data)) timer->status = 1;
     else if(!strcmp("set" SETPASS, timer->data)) timer->status = 2;
-    else if(!strcmp("cat", timer->data)) return sendAll(data_path, timer);
+    else if(!strcmp("cat", timer->data)) return send_all(data_path, timer);
     else if(!strcmp("quit", timer->data)) return 0;
-    return sendData(timer->accept_fd, timer->data, timer->numbytes);
+    return send_data(timer->accept_fd, timer->data, timer->numbytes);
 }
 
 int s1_get(THREADTIMER *timer) {        //get kanban
@@ -170,7 +171,7 @@ int s1_get(THREADTIMER *timer) {        //get kanban
                 if(cli_ver < ver) {     //need to send a new kanban
                     closeFile(fp);
                     timer->is_open = 0;
-                    return sendAll(kanban_path, timer);
+                    return send_all(kanban_path, timer);
                 }
             }
         }
@@ -189,10 +190,10 @@ int s2_set(THREADTIMER *timer) {
         timer->status = 3;
         timer->fp = fp;
         timer->is_open = 1;
-        return sendData(timer->accept_fd, "data", 4);
+        return send_data(timer->accept_fd, "data", 4);
     } else {
         timer->status = 0;
-        return sendData(timer->accept_fd, "erro", 4);
+        return send_data(timer->accept_fd, "erro", 4);
     }
 }
 
@@ -271,21 +272,25 @@ void acceptTimer(void *p) {
         sleep(MAXWAITSEC);
         puts("Check accept status");
         if(time(NULL) - timer->touch > MAXWAITSEC) {
-            pthread_kill(*timer->thread, SIGQUIT);
-            close(timer->accept_fd);
-            if(timer->data) free(timer->data);
-            if(timer->is_open) closeFile(timer->fp);
-            *timer->thread = 0;
+            kill_thread(timer);
         }
     }
     free(p);
+}
+
+void kill_thread(THREADTIMER* timer) {
+    pthread_kill(*timer->thread, SIGQUIT);
+    close(timer->accept_fd);
+    if(timer->data) free(timer->data);
+    if(timer->is_open) closeFile(timer->fp);
+    *timer->thread = 0;
 }
 
 void handle_pipe(int signo) {
     puts("Pipe error");
 }
 
-void handleAccept(void *p) {
+void handle_accept(void *p) {
     int accept_fd = timerPointerOf(p)->accept_fd;
     if(accept_fd > 0) {
         puts("Connected to the client.");
@@ -294,7 +299,7 @@ void handleAccept(void *p) {
         pthread_t thread;
         if (pthread_create(&thread, NULL, (void *)&acceptTimer, p)) puts("Error creating timer thread");
         else puts("Creating timer thread succeeded");
-        sendData(accept_fd, "Welcome to simple kanban server.", 33);
+        send_data(accept_fd, "Welcome to simple kanban server.", 33);
         timerPointerOf(p)->status = -1;
         char *buff = calloc(BUFSIZ, sizeof(char));
         if(buff) {
@@ -306,7 +311,8 @@ void handleAccept(void *p) {
                 puts("Check buffer");
                 if(!checkBuffer(timerPointerOf(p))) break;
             }
-            printf("Recv %zd bytes\n", timerPointerOf(p)->numbytes);
+            printf("Break: recv %zd bytes\n", timerPointerOf(p)->numbytes);
+            kill_thread(timerPointerOf(p));
         } else puts("Error allocating buffer");
         close(accept_fd);
     } else puts("Error accepting client");
@@ -335,7 +341,7 @@ void acceptClient() {
                 timer->data = NULL;
                 timer->is_open = 0;
                 timer->fp = NULL;
-                if (pthread_create(timer->thread, NULL, (void *)&handleAccept, timer)) puts("Error creating thread");
+                if (pthread_create(timer->thread, NULL, (void *)&handle_accept, timer)) puts("Error creating thread");
                 else puts("Creating thread succeeded");
             } else puts("Allocate timer error");
         } else {
@@ -361,7 +367,7 @@ FILE *openFile(char* file_path, int lock_type, char* mode) {
 int closeFileAndSend(THREADTIMER *timer, char *data, size_t numbytes) {
     closeFile(timer->fp);
     timer->is_open = 0;
-    return sendData(timer->accept_fd, data, numbytes);
+    return send_data(timer->accept_fd, data, numbytes);
 }
 
 void closeFile(FILE *fp) {
