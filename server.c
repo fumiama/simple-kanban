@@ -16,8 +16,6 @@
 
 #if !__APPLE__
     #include <sys/sendfile.h> 
-#else
-    struct sf_hdtr hdtr; 
 #endif
 
 #define PASSWORD "fumiama"
@@ -129,6 +127,7 @@ int sendAll(char* file_path, THREADTIMER *timer) {
         printf("Get file size: %u bytes.\n", file_size);
         off_t len = 0;
         #if __APPLE__
+            struct sf_hdtr hdtr;
             struct iovec headers;
             headers.iov_base = &file_size;
             headers.iov_len = sizeof(uint32_t);
