@@ -270,20 +270,24 @@ void accept_timer(void *p) {
     while(!pthread_kill(*(timer->thread), 0)) {
         sleep(MAXWAITSEC);
         puts("Check accept status");
-        if(!*(timer->thread)) {
-            free(timer);
-            break;
-        } else if(time(NULL) - timer->touch > MAXWAITSEC) {
+        if(time(NULL) - timer->touch > MAXWAITSEC) {
             kill_thread(timer);
-            free(timer);
+            free(p);
             break;
         }
     }
 }
 
 void kill_thread(THREADTIMER* timer) {
-    pthread_kill(*(timer->thread), SIGQUIT);
-    close(timer->accept_fd);
+    if(*(timer->thread)) {
+        pthread_kill(*(timer->thread), SIGQUIT);
+        *(timer->thread) = 0;
+        puts("Kill thread.");
+    }
+    if(timer->accept_fd) {
+        close(timer->accept_fd);
+        timer->accept_fd = 0;
+    }
     if(timer->data) {
         free(timer->data);
         timer->data = NULL;
@@ -294,8 +298,6 @@ void kill_thread(THREADTIMER* timer) {
         timer->is_open = 0;
         puts("Close file.");
     }
-    *(timer->thread) = 0;
-    puts("Kill thread.");
 }
 
 void handle_pipe(int signo) {
@@ -326,6 +328,7 @@ void handle_accept(void *p) {
             }
             printf("Break: recv %zd bytes\n", timer_pointer_of(p)->numbytes);
         } else puts("Error allocating buffer");
+        timer_pointer_of(p)->thread = 0;
         kill_thread(timer_pointer_of(p));
     } else puts("Error accepting client");
 }
