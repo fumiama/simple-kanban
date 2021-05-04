@@ -29,7 +29,8 @@ struct sockaddr_in server_addr;
 char *data_path;
 char *kanban_path;
 
-pthread_t accept_threads[8];
+#define THREADCNT 16
+pthread_t accept_threads[THREADCNT];
 
 #define MAXWAITSEC 10
 struct THREADTIMER {
@@ -46,29 +47,29 @@ typedef struct THREADTIMER THREADTIMER;
 
 #define showUsage(program) printf("Usage: %s [-d] listen_port try_times kanban_file data_file\n\t-d: As daemon\n", program)
 
-void acceptClient();
-void acceptTimer(void *p);
-int bindServer(uint16_t port, u_int try_times);
-int checkBuffer(THREADTIMER *timer);
-void closeFile(FILE *fp);
-int closeFileAndSend(THREADTIMER *timer, char *data, size_t numbytes);
-off_t fileSize(const char* fname);
-int freeAfterSend(int accept_fd, char *data, size_t length);
+void accept_client();
+void accept_timer(void *p);
+int bind_server(uint16_t port, u_int try_times);
+int check_buffer(THREADTIMER *timer);
+void close_file(FILE *fp);
+int close_file_and_send(THREADTIMER *timer, char *data, size_t numbytes);
+int free_after_send(int accept_fd, char *data, size_t length);
 void handle_accept(void *accept_fd_p);
 void handle_pipe(int signo);
 void handle_quit(int signo);
 void kill_thread(THREADTIMER* timer);
-int listenSocket(u_int try_times);
-FILE *openFile(char* file_path, int lock_type, char* mode);
+int listen_socket(u_int try_times);
+FILE *open_file(char* file_path, int lock_type, char* mode);
 int send_all(char* file_path, THREADTIMER *timer);
 int send_data(int accept_fd, char *data, size_t length);
 int sm1_pwd(THREADTIMER *timer);
+off_t size_of_file(const char* fname);
 int s0_init(THREADTIMER *timer);
 int s1_get(THREADTIMER *timer);
 int s2_set(THREADTIMER *timer);
 int s3_setData(THREADTIMER *timer);
 
-int bindServer(uint16_t port, u_int try_times) {
+int bind_server(uint16_t port, u_int try_times) {
     int fail_count = 0;
     int result = -1;
     server_addr.sin_family = AF_INET;
@@ -87,7 +88,7 @@ int bindServer(uint16_t port, u_int try_times) {
     }
 }
 
-int listenSocket(u_int try_times) {
+int listen_socket(u_int try_times) {
     int fail_count = 0;
     int result = -1;
     while(!~(result = listen(fd, 10)) && fail_count++ < try_times) sleep(1);
@@ -100,7 +101,7 @@ int listenSocket(u_int try_times) {
     }
 }
 
-int freeAfterSend(int accept_fd, char *data, size_t length) {
+int free_after_send(int accept_fd, char *data, size_t length) {
     int re = send_data(accept_fd, data, length);
     free(data);\
     return re;
@@ -119,11 +120,11 @@ int send_data(int accept_fd, char *data, size_t length) {
 
 int send_all(char* file_path, THREADTIMER *timer) {
     int re = 1;
-    FILE *fp = openFile(file_path, LOCK_SH, "rb");
+    FILE *fp = open_file(file_path, LOCK_SH, "rb");
     if(fp) {
         timer->fp = fp;
         timer->is_open = 1;
-        uint32_t file_size = (uint32_t)fileSize(file_path);
+        uint32_t file_size = (uint32_t)size_of_file(file_path);
         printf("Get file size: %u bytes.\n", file_size);
         off_t len = 0;
         #if __APPLE__
@@ -139,7 +140,7 @@ int send_all(char* file_path, THREADTIMER *timer) {
             sendfile(timer->accept_fd, fileno(fp), &len, file_size);
         #endif
         printf("Send %lld bytes.\n", len);
-        closeFile(fp);
+        close_file(fp);
         timer->is_open = 0;
     }
     return re;
@@ -159,7 +160,7 @@ int s0_init(THREADTIMER *timer) {
 }
 
 int s1_get(THREADTIMER *timer) {        //get kanban
-    FILE *fp = openFile(kanban_path, LOCK_SH, "rb");
+    FILE *fp = open_file(kanban_path, LOCK_SH, "rb");
     timer->status = 0;
     if(fp) {
         timer->fp = fp;
@@ -168,22 +169,22 @@ int s1_get(THREADTIMER *timer) {        //get kanban
         if(fscanf(fp, "%u", &ver) > 0) {
             if(sscanf(timer->data, "%u", &cli_ver) > 0) {
                 if(cli_ver < ver) {     //need to send a new kanban
-                    closeFile(fp);
+                    close_file(fp);
                     timer->is_open = 0;
                     return send_all(kanban_path, timer);
                 }
             }
         }
     }
-    return closeFileAndSend(timer, "null", 4);
+    return close_file_and_send(timer, "null", 4);
 }
 
 int s2_set(THREADTIMER *timer) {
     FILE *fp = NULL;
     if(!strcmp(timer->data, "ver")) {
-        fp = openFile(kanban_path, LOCK_EX, "wb");
+        fp = open_file(kanban_path, LOCK_EX, "wb");
     } else if(!strcmp(timer->data, "dat")) {
-        fp = openFile(data_path, LOCK_EX, "wb");
+        fp = open_file(data_path, LOCK_EX, "wb");
     }
     if(fp) {
         timer->status = 3;
@@ -203,7 +204,7 @@ int s3_setData(THREADTIMER *timer) {
     int is_first_data = 0;
     if(timer->numbytes == sizeof(uint32_t)) {
         if((timer->numbytes = recv(timer->accept_fd, timer->data, BUFSIZ, 0)) <= 0) 
-            return closeFileAndSend(timer, "erro", 4);
+            return close_file_and_send(timer, "erro", 4);
         else {
             is_first_data = 1;
             printf("Get data size: %tu\n", timer->numbytes);
@@ -215,12 +216,12 @@ int s3_setData(THREADTIMER *timer) {
         }
         if(fwrite(timer->data + (is_first_data?0:sizeof(uint32_t)), file_size, 1, timer->fp) != 1) {
             puts("Set data error.");
-            return closeFileAndSend(timer, "erro", 4);
-        } else return closeFileAndSend(timer, "succ", 4);
+            return close_file_and_send(timer, "erro", 4);
+        } else return close_file_and_send(timer, "succ", 4);
     } else {
         if(fwrite(timer->data + (is_first_data?0:sizeof(uint32_t)), timer->numbytes - (is_first_data?0:sizeof(uint32_t)), 1, timer->fp) != 1) {
             puts("Set data error.");
-            return closeFileAndSend(timer, "erro", 4);
+            return close_file_and_send(timer, "erro", 4);
         }
         int32_t remain = file_size - timer->numbytes;
         while(remain > 0) {
@@ -228,22 +229,22 @@ int s3_setData(THREADTIMER *timer) {
             timer->numbytes = recv(timer->accept_fd, timer->data, BUFSIZ, 0);
             if(fwrite(timer->data, timer->numbytes, 1, timer->fp) != 1) {
                 puts("Set data error.");
-                return closeFileAndSend(timer, "erro", 4);
+                return close_file_and_send(timer, "erro", 4);
             }
             remain -= timer->numbytes;
         }
-        return closeFileAndSend(timer, "succ", 4);
+        return close_file_and_send(timer, "succ", 4);
     }
-    return closeFileAndSend(timer, "erro", 4);
+    return close_file_and_send(timer, "erro", 4);
 }
 
-off_t fileSize(const char* fname) {
+off_t size_of_file(const char* fname) {
     struct stat statbuf;
     if(stat(fname, &statbuf)==0) return statbuf.st_size;
     else return -1;
 }
 
-int checkBuffer(THREADTIMER *timer) {
+int check_buffer(THREADTIMER *timer) {
     printf("Status: %d\n", timer->status);
     switch(timer->status) {
         case -1: return sm1_pwd(timer); break;
@@ -263,26 +264,40 @@ void handle_quit(int signo) {
 #define timerPointerOf(x) ((THREADTIMER*)(x))
 #define touchTimer(x) timerPointerOf(x)->touch = time(NULL)
 
-void acceptTimer(void *p) {
+void accept_timer(void *p) {
+    pthread_detach(pthread_self());
     THREADTIMER *timer = timerPointerOf(p);
     signal(SIGQUIT, handle_pipe);
     signal(SIGPIPE, handle_pipe);
-    while(*timer->thread && !pthread_kill(*timer->thread, 0)) {
+    while(!pthread_kill(*timer->thread, 0)) {
         sleep(MAXWAITSEC);
         puts("Check accept status");
-        if(*timer->thread && time(NULL) - timer->touch > MAXWAITSEC) {
+        if(!*timer->thread) {
+            free(timer);
+            break;
+        } else if(time(NULL) - timer->touch > MAXWAITSEC) {
             kill_thread(timer);
+            free(timer);
+            break;
         }
     }
-    free(p);
 }
 
 void kill_thread(THREADTIMER* timer) {
     pthread_kill(*timer->thread, SIGQUIT);
     close(timer->accept_fd);
-    if(timer->data) free(timer->data);
-    if(timer->is_open) closeFile(timer->fp);
+    if(timer->data) {
+        free(timer->data);
+        timer->data = NULL;
+        puts("Free data.");
+    }
+    if(timer->is_open) {
+        close_file(timer->fp);
+        timer->is_open = 0;
+        puts("Close file.");
+    }
     *timer->thread = 0;
+    puts("Kill thread.");
 }
 
 void handle_pipe(int signo) {
@@ -290,13 +305,14 @@ void handle_pipe(int signo) {
 }
 
 void handle_accept(void *p) {
+    pthread_detach(pthread_self());
     int accept_fd = timerPointerOf(p)->accept_fd;
     if(accept_fd > 0) {
         puts("Connected to the client.");
         signal(SIGQUIT, handle_quit);
         signal(SIGPIPE, handle_pipe);
         pthread_t thread;
-        if (pthread_create(&thread, NULL, (void *)&acceptTimer, p)) puts("Error creating timer thread");
+        if (pthread_create(&thread, NULL, (void *)&accept_timer, p)) puts("Error creating timer thread");
         else puts("Creating timer thread succeeded");
         send_data(accept_fd, "Welcome to simple kanban server.", 33);
         timerPointerOf(p)->status = -1;
@@ -308,7 +324,7 @@ void handle_accept(void *p) {
                 buff[timerPointerOf(p)->numbytes] = 0;
                 printf("Get %zd bytes: %s\n", timerPointerOf(p)->numbytes, buff);
                 puts("Check buffer");
-                if(!checkBuffer(timerPointerOf(p))) break;
+                if(!check_buffer(timerPointerOf(p))) break;
             }
             printf("Break: recv %zd bytes\n", timerPointerOf(p)->numbytes);
             kill_thread(timerPointerOf(p));
@@ -317,7 +333,7 @@ void handle_accept(void *p) {
     } else puts("Error accepting client");
 }
 
-void acceptClient() {
+void accept_client() {
     pid_t pid = fork();
     while (pid > 0) {      //主进程监控子进程状态，如果子进程异常终止则重启之
         wait(NULL);
@@ -328,8 +344,8 @@ void acceptClient() {
     else while(1) {
         puts("Ready for accept, waitting...");
         int p = 0;
-        while(p < 8 && accept_threads[p] && !pthread_kill(accept_threads[p], 0)) p++;
-        if(p < 8) {
+        while(p < THREADCNT && accept_threads[p] && !pthread_kill(accept_threads[p], 0)) p++;
+        if(p < THREADCNT) {
             printf("Run on thread No.%d\n", p);
             THREADTIMER *timer = malloc(sizeof(THREADTIMER));
             if(timer) {
@@ -350,7 +366,7 @@ void acceptClient() {
     }
 }
 
-FILE *openFile(char* file_path, int lock_type, char* mode) {
+FILE *open_file(char* file_path, int lock_type, char* mode) {
     FILE *fp = NULL;
     fp = fopen(file_path, mode);
     if(fp) {
@@ -363,13 +379,13 @@ FILE *openFile(char* file_path, int lock_type, char* mode) {
     return fp;
 }
 
-int closeFileAndSend(THREADTIMER *timer, char *data, size_t numbytes) {
-    closeFile(timer->fp);
+int close_file_and_send(THREADTIMER *timer, char *data, size_t numbytes) {
+    close_file(timer->fp);
     timer->is_open = 0;
     return send_data(timer->accept_fd, data, numbytes);
 }
 
-void closeFile(FILE *fp) {
+void close_file(FILE *fp) {
     puts("Close dict");
     if(fp) {
         flock(fileno(fp), LOCK_UN);
@@ -402,7 +418,7 @@ int main(int argc, char *argv[]) {
                             fclose(fp);
                             signal(SIGQUIT, handle_pipe);
                             signal(SIGPIPE, handle_pipe);
-                            if(bindServer(port, times)) if(listenSocket(times)) acceptClient();
+                            if(bind_server(port, times)) if(listen_socket(times)) accept_client();
                         }
                     } else printf("Error opening kanban file: %s\n", argv[as_daemon?4:3]);
                 } else puts("Start daemon error");

@@ -37,7 +37,7 @@ void getMessage(void *p) {
     }
 }
 
-off_t fileSize(const char* fname) {
+off_t size_of_file(const char* fname) {
     struct stat statbuf;
     if(stat(fname, &statbuf)==0) return statbuf.st_size;
     else return -1;
@@ -73,7 +73,7 @@ int main(int argc,char *argv[]) {   //usage: ./client host port
                 fp = fopen(buf, "rb");
                 if(fp) {
                     off_t len = 0;
-                    file_size = (uint32_t)fileSize(buf);
+                    file_size = (uint32_t)size_of_file(buf);
                     #if __APPLE__
                         struct iovec headers;
                         headers.iov_base = &file_size;
