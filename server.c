@@ -328,7 +328,7 @@ void handle_accept(void *p) {
             }
             printf("Break: recv %zd bytes\n", timer_pointer_of(p)->numbytes);
         } else puts("Error allocating buffer");
-        timer_pointer_of(p)->thread = 0;
+        *(timer_pointer_of(p)->thread) = 0;
         kill_thread(timer_pointer_of(p));
     } else puts("Error accepting client");
 }
