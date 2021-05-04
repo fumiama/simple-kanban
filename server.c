@@ -53,7 +53,6 @@ int bind_server(uint16_t port, u_int try_times);
 int check_buffer(THREADTIMER *timer);
 void close_file(FILE *fp);
 int close_file_and_send(THREADTIMER *timer, char *data, size_t numbytes);
-int free_after_send(int accept_fd, char *data, size_t length);
 void handle_accept(void *accept_fd_p);
 void handle_pipe(int signo);
 void handle_quit(int signo);
@@ -99,12 +98,6 @@ int listen_socket(u_int try_times) {
         puts("Listening....");
         return 1;
     }
-}
-
-int free_after_send(int accept_fd, char *data, size_t length) {
-    int re = send_data(accept_fd, data, length);
-    free(data);\
-    return re;
 }
 
 int send_data(int accept_fd, char *data, size_t length) {
@@ -274,7 +267,7 @@ void accept_timer(void *p) {
             puts("Call kill thread");
             kill_thread(timer);
             puts("Free timer");
-            free(p);
+            free(timer);
             puts("Finish checking accept status");
             break;
         }
@@ -282,6 +275,7 @@ void accept_timer(void *p) {
 }
 
 void kill_thread(THREADTIMER* timer) {
+    puts("Start killing.");
     if(*(timer->thread)) {
         pthread_kill(*(timer->thread), SIGQUIT);
         *(timer->thread) = 0;
@@ -290,6 +284,7 @@ void kill_thread(THREADTIMER* timer) {
     if(timer->accept_fd) {
         close(timer->accept_fd);
         timer->accept_fd = 0;
+        puts("Close accept.");
     }
     if(timer->data) {
         free(timer->data);
@@ -301,6 +296,7 @@ void kill_thread(THREADTIMER* timer) {
         timer->is_open = 0;
         puts("Close file.");
     }
+    puts("Finish killing.");
 }
 
 void handle_pipe(int signo) {
