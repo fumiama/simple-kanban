@@ -271,8 +271,11 @@ void accept_timer(void *p) {
         sleep(MAXWAITSEC);
         puts("Check accept status");
         if(time(NULL) - timer->touch > MAXWAITSEC) {
+            puts("Call kill thread");
             kill_thread(timer);
+            puts("Free timer");
             free(p);
+            puts("Finish checking accept status");
             break;
         }
     }
