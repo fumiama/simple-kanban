@@ -260,18 +260,16 @@ void handle_quit(int signo) {
 void accept_timer(void *p) {
     pthread_detach(pthread_self());
     THREADTIMER *timer = timer_pointer_of(p);
-    while(!pthread_kill(*(timer->thread), 0)) {
-        sleep(MAXWAITSEC);
+    while(*(timer->thread) && !pthread_kill(*(timer->thread), 0)) {
+        sleep(MAXWAITSEC / 4);
         puts("Check accept status");
-        if(time(NULL) - timer->touch > MAXWAITSEC) {
-            puts("Call kill thread");
-            kill_thread(timer);
-            puts("Free timer");
-            free(timer);
-            puts("Finish checking accept status");
-            break;
-        }
+        if(time(NULL) - timer->touch > MAXWAITSEC) break;
     }
+    puts("Call kill thread");
+    kill_thread(timer);
+    puts("Free timer");
+    free(timer);
+    puts("Finish calling kill thread");
 }
 
 void kill_thread(THREADTIMER* timer) {
