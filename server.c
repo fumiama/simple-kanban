@@ -67,7 +67,7 @@ off_t size_of_file(const char* fname);
 int s0_init(THREADTIMER *timer);
 int s1_get(THREADTIMER *timer);
 int s2_set(THREADTIMER *timer);
-int s3_setData(THREADTIMER *timer);
+int s3_set_data(THREADTIMER *timer);
 
 int bind_server(uint16_t port, u_int try_times) {
     int fail_count = 0;
@@ -197,7 +197,7 @@ int s2_set(THREADTIMER *timer) {
     }
 }
 
-int s3_setData(THREADTIMER *timer) {
+int s3_set_data(THREADTIMER *timer) {
     timer->status = 0;
     uint32_t file_size = *(uint32_t*)(timer->data);
     printf("Set data size: %u\n", file_size);
@@ -251,24 +251,22 @@ int check_buffer(THREADTIMER *timer) {
         case 0: return s0_init(timer); break;
         case 1: return s1_get(timer); break;
         case 2: return s2_set(timer); break;
-        case 3: return s3_setData(timer); break;
+        case 3: return s3_set_data(timer); break;
         default: return -1; break;
     }
 }
 
 void handle_quit(int signo) {
-    printf("Handle sig %d\n", signo);
+    printf("Handle quit with sig %d\n", signo);
     pthread_exit(NULL);
 }
 
-#define timerPointerOf(x) ((THREADTIMER*)(x))
-#define touchTimer(x) timerPointerOf(x)->touch = time(NULL)
+#define timer_pointer_of(x) ((THREADTIMER*)(x))
+#define touch_timer(x) timer_pointer_of(x)->touch = time(NULL)
 
 void accept_timer(void *p) {
     pthread_detach(pthread_self());
-    THREADTIMER *timer = timerPointerOf(p);
-    signal(SIGQUIT, handle_pipe);
-    signal(SIGPIPE, handle_pipe);
+    THREADTIMER *timer = timer_pointer_of(p);
     while(!pthread_kill(*(timer->thread), 0)) {
         sleep(MAXWAITSEC);
         puts("Check accept status");
@@ -301,12 +299,12 @@ void kill_thread(THREADTIMER* timer) {
 }
 
 void handle_pipe(int signo) {
-    printf("Pipe error: %d", signo);
+    printf("Pipe error: %d\n", signo);
 }
 
 void handle_accept(void *p) {
     pthread_detach(pthread_self());
-    int accept_fd = timerPointerOf(p)->accept_fd;
+    int accept_fd = timer_pointer_of(p)->accept_fd;
     if(accept_fd > 0) {
         puts("Connected to the client.");
         signal(SIGQUIT, handle_quit);
@@ -315,20 +313,20 @@ void handle_accept(void *p) {
         if (pthread_create(&thread, NULL, (void *)&accept_timer, p)) puts("Error creating timer thread");
         else puts("Creating timer thread succeeded");
         send_data(accept_fd, "Welcome to simple kanban server.", 33);
-        timerPointerOf(p)->status = -1;
+        timer_pointer_of(p)->status = -1;
         char *buff = calloc(BUFSIZ, sizeof(char));
         if(buff) {
-            timerPointerOf(p)->data = buff;
-            while(*(timerPointerOf(p)->thread) && (timerPointerOf(p)->numbytes = recv(accept_fd, buff, BUFSIZ, 0)) > 0) {
-                touchTimer(p);
-                buff[timerPointerOf(p)->numbytes] = 0;
-                printf("Get %zd bytes: %s\n", timerPointerOf(p)->numbytes, buff);
+            timer_pointer_of(p)->data = buff;
+            while(*(timer_pointer_of(p)->thread) && (timer_pointer_of(p)->numbytes = recv(accept_fd, buff, BUFSIZ, 0)) > 0) {
+                touch_timer(p);
+                buff[timer_pointer_of(p)->numbytes] = 0;
+                printf("Get %zd bytes: %s\n", timer_pointer_of(p)->numbytes, buff);
                 puts("Check buffer");
-                if(!check_buffer(timerPointerOf(p))) break;
+                if(!check_buffer(timer_pointer_of(p))) break;
             }
-            printf("Break: recv %zd bytes\n", timerPointerOf(p)->numbytes);
+            printf("Break: recv %zd bytes\n", timer_pointer_of(p)->numbytes);
         } else puts("Error allocating buffer");
-        kill_thread(timerPointerOf(p));
+        kill_thread(timer_pointer_of(p));
     } else puts("Error accepting client");
 }
 
@@ -355,6 +353,8 @@ void accept_client() {
                 timer->data = NULL;
                 timer->is_open = 0;
                 timer->fp = NULL;
+                signal(SIGQUIT, handle_quit);
+                signal(SIGPIPE, handle_pipe);
                 if (pthread_create(timer->thread, NULL, (void *)&handle_accept, timer)) puts("Error creating thread");
                 else puts("Creating thread succeeded");
             } else puts("Allocate timer error");
@@ -373,8 +373,8 @@ FILE *open_file(char* file_path, int lock_type, char* mode) {
             printf("Error: ");
             fp = NULL;
         }
-        printf("Open dict in mode %d\n", lock_type);
-    } else puts("Open dict error");
+        printf("Open file in mode %d\n", lock_type);
+    } else puts("Open file error");
     return fp;
 }
 
@@ -385,7 +385,7 @@ int close_file_and_send(THREADTIMER *timer, char *data, size_t numbytes) {
 }
 
 void close_file(FILE *fp) {
-    puts("Close dict");
+    puts("Close file");
     if(fp) {
         flock(fileno(fp), LOCK_UN);
         fclose(fp);
@@ -415,8 +415,6 @@ int main(int argc, char *argv[]) {
                         if(fp) {
                             data_path = argv[as_daemon?5:4];
                             fclose(fp);
-                            signal(SIGQUIT, handle_pipe);
-                            signal(SIGPIPE, handle_pipe);
                             if(bind_server(port, times)) if(listen_socket(times)) accept_client();
                         }
                     } else printf("Error opening kanban file: %s\n", argv[as_daemon?4:3]);
