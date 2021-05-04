@@ -269,10 +269,10 @@ void accept_timer(void *p) {
     THREADTIMER *timer = timerPointerOf(p);
     signal(SIGQUIT, handle_pipe);
     signal(SIGPIPE, handle_pipe);
-    while(!pthread_kill(*timer->thread, 0)) {
+    while(!pthread_kill(*(timer->thread), 0)) {
         sleep(MAXWAITSEC);
         puts("Check accept status");
-        if(!*timer->thread) {
+        if(!*(timer->thread)) {
             free(timer);
             break;
         } else if(time(NULL) - timer->touch > MAXWAITSEC) {
@@ -284,7 +284,7 @@ void accept_timer(void *p) {
 }
 
 void kill_thread(THREADTIMER* timer) {
-    pthread_kill(*timer->thread, SIGQUIT);
+    pthread_kill(*(timer->thread), SIGQUIT);
     close(timer->accept_fd);
     if(timer->data) {
         free(timer->data);
@@ -296,12 +296,12 @@ void kill_thread(THREADTIMER* timer) {
         timer->is_open = 0;
         puts("Close file.");
     }
-    *timer->thread = 0;
+    *(timer->thread) = 0;
     puts("Kill thread.");
 }
 
 void handle_pipe(int signo) {
-    puts("Pipe error");
+    printf("Pipe error: %d", signo);
 }
 
 void handle_accept(void *p) {
@@ -319,7 +319,7 @@ void handle_accept(void *p) {
         char *buff = calloc(BUFSIZ, sizeof(char));
         if(buff) {
             timerPointerOf(p)->data = buff;
-            while(*timerPointerOf(p)->thread && (timerPointerOf(p)->numbytes = recv(accept_fd, buff, BUFSIZ, 0)) > 0) {
+            while(*(timerPointerOf(p)->thread) && (timerPointerOf(p)->numbytes = recv(accept_fd, buff, BUFSIZ, 0)) > 0) {
                 touchTimer(p);
                 buff[timerPointerOf(p)->numbytes] = 0;
                 printf("Get %zd bytes: %s\n", timerPointerOf(p)->numbytes, buff);
@@ -327,9 +327,8 @@ void handle_accept(void *p) {
                 if(!check_buffer(timerPointerOf(p))) break;
             }
             printf("Break: recv %zd bytes\n", timerPointerOf(p)->numbytes);
-            kill_thread(timerPointerOf(p));
         } else puts("Error allocating buffer");
-        close(accept_fd);
+        kill_thread(timerPointerOf(p));
     } else puts("Error accepting client");
 }
 
