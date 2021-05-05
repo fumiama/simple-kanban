@@ -164,7 +164,9 @@ int s1_get(THREADTIMER *timer) {        //get kanban
                 if(cli_ver < ver) {     //need to send a new kanban
                     close_file(fp);
                     timer->is_open = 0;
-                    return send_all(kanban_path, timer);
+                    int r = send_all(kanban_path, timer);
+                    if(strstr(timer->data, "quit") == timer->data - 4) return 0;
+                    else return r;
                 }
             }
         }
@@ -301,6 +303,21 @@ void handle_pipe(int signo) {
     printf("Pipe error: %d\n", signo);
 }
 
+#define chkbuf(p) if(!check_buffer(timer_pointer_of(p))) break
+
+#define take_word(w) if(strstr(buff, w) == buff) {\
+                        int l = strlen(w);\
+                        char store = buff[l];\
+                        buff[l] = 0;\
+                        ssize_t n = timer_pointer_of(p)->numbytes - l;\
+                        timer_pointer_of(p)->numbytes = l;\
+                        chkbuf(p);\
+                        buff[0] = store;\
+                        memmove(buff + 1, buff + l + 1, n - 1);\
+                        buff[n] = 0;\
+                        timer_pointer_of(p)->numbytes = n;\
+                    }
+
 void handle_accept(void *p) {
     pthread_detach(pthread_self());
     int accept_fd = timer_pointer_of(p)->accept_fd;
@@ -321,7 +338,16 @@ void handle_accept(void *p) {
                 buff[timer_pointer_of(p)->numbytes] = 0;
                 printf("Get %zd bytes: %s\n", timer_pointer_of(p)->numbytes, buff);
                 puts("Check buffer");
-                if(!check_buffer(timer_pointer_of(p))) break;
+                if(timer_pointer_of(p)->numbytes > 3) {     //处理部分粘连
+                    take_word(PASSWORD)
+                    take_word("get")
+                    take_word("cat")
+                    take_word("quit")
+                    take_word("set" SETPASS)
+                    take_word("ver")
+                    take_word("dat")
+                }
+                if(timer_pointer_of(p)->numbytes > 0) chkbuf(p);
             }
             printf("Break: recv %zd bytes\n", timer_pointer_of(p)->numbytes);
         } else puts("Error allocating buffer");
