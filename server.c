@@ -133,7 +133,7 @@ int send_all(char* file_path, THREADTIMER *timer) {
             if(!re) perror("Sendfile");
         #else
             send(timer->accept_fd, &file_size, sizeof(uint32_t), 0);
-            re = !sendfile(timer->accept_fd, fileno(fp), &len, file_size);
+            re = sendfile(timer->accept_fd, fileno(fp), &len, file_size) >= 0;
             if(!re) perror("Sendfile");
         #endif
         printf("Send %lld bytes.\n", len);
