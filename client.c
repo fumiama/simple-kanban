@@ -80,6 +80,8 @@ int main(int argc,char *argv[]) {   //usage: ./client host port
                         headers.iov_len = sizeof(uint32_t);
                         hdtr.headers = &headers;
                         hdtr.hdr_cnt = 1;
+                        hdtr.trailers = NULL;
+                        hdtr.trl_cnt = 0;
                         if(!sendfile(fileno(fp), sockfd, 0, &len, &hdtr, 0)) puts("Send file success.");
                         else puts("Send file error.");
                     #else

@@ -127,7 +127,10 @@ int send_all(char* file_path, THREADTIMER *timer) {
             headers.iov_len = sizeof(uint32_t);
             hdtr.headers = &headers;
             hdtr.hdr_cnt = 1;
+            hdtr.trailers = NULL;
+            hdtr.trl_cnt = 0;
             re = !sendfile(fileno(fp), timer->accept_fd, 0, &len, &hdtr, 0);
+            //if(!re) perror("Sendfile");
         #else
             send(timer->accept_fd, &file_size, sizeof(uint32_t), 0);
             re = !sendfile(timer->accept_fd, fileno(fp), &len, file_size);
@@ -165,7 +168,11 @@ int s1_get(THREADTIMER *timer) {        //get kanban
                     close_file(fp);
                     timer->is_open = 0;
                     int r = send_all(kanban_path, timer);
-                    if(strstr(timer->data, "quit") == timer->data - 4) return 0;
+                    printf("Sendall returns %d\n", r);
+                    if(strstr(timer->data, "quit") == timer->data - 4) {
+                        puts("Found last cmd is quit.");
+                        return 0;
+                    }
                     else return r;
                 }
             }
@@ -305,7 +312,7 @@ void handle_pipe(int signo) {
 
 #define chkbuf(p) if(!check_buffer(timer_pointer_of(p))) break
 
-#define take_word(w) if(strstr(buff, w) == buff) {\
+#define take_word(p, w) if(timer_pointer_of(p)->numbytes > strlen(w) && strstr(buff, w) == buff) {\
                         int l = strlen(w);\
                         char store = buff[l];\
                         buff[l] = 0;\
@@ -316,6 +323,7 @@ void handle_pipe(int signo) {
                         memmove(buff + 1, buff + l + 1, n - 1);\
                         buff[n] = 0;\
                         timer_pointer_of(p)->numbytes = n;\
+                        printf("Split cmd: %s\n", w);\
                     }
 
 void handle_accept(void *p) {
@@ -338,15 +346,14 @@ void handle_accept(void *p) {
                 buff[timer_pointer_of(p)->numbytes] = 0;
                 printf("Get %zd bytes: %s\n", timer_pointer_of(p)->numbytes, buff);
                 puts("Check buffer");
-                if(timer_pointer_of(p)->numbytes > 3) {     //处理部分粘连
-                    take_word(PASSWORD)
-                    take_word("get")
-                    take_word("cat")
-                    take_word("quit")
-                    take_word("set" SETPASS)
-                    take_word("ver")
-                    take_word("dat")
-                }
+                //处理部分粘连
+                take_word(p, PASSWORD);
+                take_word(p, "get");
+                take_word(p, "cat");
+                take_word(p, "quit");
+                take_word(p, "set" SETPASS);
+                take_word(p, "ver");
+                take_word(p, "dat");
                 if(timer_pointer_of(p)->numbytes > 0) chkbuf(p);
             }
             printf("Break: recv %zd bytes\n", timer_pointer_of(p)->numbytes);
