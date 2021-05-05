@@ -130,7 +130,6 @@ int send_all(char* file_path, THREADTIMER *timer) {
             hdtr.trailers = NULL;
             hdtr.trl_cnt = 0;
             re = !sendfile(fileno(fp), timer->accept_fd, 0, &len, &hdtr, 0);
-            //if(!re) perror("Sendfile");
         #else
             send(timer->accept_fd, &file_size, sizeof(uint32_t), 0);
             re = !sendfile(timer->accept_fd, fileno(fp), &len, file_size);
@@ -139,6 +138,7 @@ int send_all(char* file_path, THREADTIMER *timer) {
         close_file(fp);
         timer->is_open = 0;
     }
+    if(!re) perror("Sendfile");
     return re;
 }
 
