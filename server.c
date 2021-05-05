@@ -169,8 +169,7 @@ int s1_get(THREADTIMER *timer) {        //get kanban
                     close_file(fp);
                     timer->is_open = 0;
                     int r = send_all(kanban_path, timer);
-                    printf("Sendall returns %d\n", r);
-                    if(strstr(timer->data, "quit") == timer->data - 4) {
+                    if(strstr(timer->data, "quit") == timer->data + timer->numbytes - 4) {
                         puts("Found last cmd is quit.");
                         return 0;
                     }
