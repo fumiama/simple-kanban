@@ -127,10 +127,10 @@ int send_all(char* file_path, THREADTIMER *timer) {
             headers.iov_len = sizeof(uint32_t);
             hdtr.headers = &headers;
             hdtr.hdr_cnt = 1;
-            sendfile(fileno(fp), timer->accept_fd, 0, &len, &hdtr, 0);
+            re = !sendfile(fileno(fp), timer->accept_fd, 0, &len, &hdtr, 0);
         #else
             send(timer->accept_fd, &file_size, sizeof(uint32_t), 0);
-            sendfile(timer->accept_fd, fileno(fp), &len, file_size);
+            re = !sendfile(timer->accept_fd, fileno(fp), &len, file_size);
         #endif
         printf("Send %lld bytes.\n", len);
         close_file(fp);
