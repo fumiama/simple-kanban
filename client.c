@@ -43,7 +43,7 @@ off_t size_of_file(const char* fname) {
     else return -1;
 }
 
-int main(int argc,char *argv[]) {   //usage: ./client host port [-l]
+int main(int argc,char *argv[]) {   //usage: ./client host port [-d]
     ssize_t numbytes;
     puts("break!");
     while((sockfd = socket(AF_INET,SOCK_STREAM,0)) == -1);
