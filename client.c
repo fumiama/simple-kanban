@@ -43,7 +43,7 @@ off_t size_of_file(const char* fname) {
     else return -1;
 }
 
-int main(int argc,char *argv[]) {   //usage: ./client host port
+int main(int argc,char *argv[]) {   //usage: ./client host port [-l]
     ssize_t numbytes;
     puts("break!");
     while((sockfd = socket(AF_INET,SOCK_STREAM,0)) == -1);
@@ -74,6 +74,7 @@ int main(int argc,char *argv[]) {   //usage: ./client host port
                 if(fp) {
                     off_t len = 0;
                     file_size = (uint32_t)size_of_file(buf);
+                    if(argc == 4) file_size = htonl(file_size);
                     #if __APPLE__
                         struct iovec headers;
                         headers.iov_base = &file_size;
