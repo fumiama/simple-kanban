@@ -23,8 +23,8 @@
 #define SETPASS "minamoto"
 
 int fd;
-socklen_t struct_len = sizeof(struct sockaddr_in);
-struct sockaddr_in server_addr;
+socklen_t struct_len = sizeof(struct sockaddr_in6);
+struct sockaddr_in6 server_addr;
 
 char *data_path;
 char *kanban_path;
@@ -71,12 +71,11 @@ int s3_set_data(THREADTIMER *timer);
 int bind_server(uint16_t port, u_int try_times) {
     int fail_count = 0;
     int result = -1;
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
-    server_addr.sin_addr.s_addr = INADDR_ANY;
-    bzero(&(server_addr.sin_zero), 8);
+    server_addr.sin6_family = AF_INET6;
+    server_addr.sin6_port = htons(port);
+    bzero(&(server_addr.sin6_addr), sizeof(server_addr.sin6_addr));
     
-    fd = socket(AF_INET, SOCK_STREAM, 0);
+    fd = socket(PF_INET6, SOCK_STREAM, 0);
     while(!~(result = bind(fd, (struct sockaddr *)&server_addr, struct_len)) && fail_count++ < try_times) sleep(1);
     if(!~result && fail_count >= try_times) {
         puts("Bind server failure!");
