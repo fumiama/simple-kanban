@@ -121,6 +121,7 @@ int send_all(char* file_path, THREADTIMER *timer) {
         printf("Get file size: %u bytes.\n", file_size);
         off_t len = 0;
         #if __APPLE__
+            //苹果基本没有大端，不作处理
             struct sf_hdtr hdtr;
             struct iovec headers;
             headers.iov_base = &file_size;
@@ -132,7 +133,12 @@ int send_all(char* file_path, THREADTIMER *timer) {
             re = !sendfile(fileno(fp), timer->accept_fd, 0, &len, &hdtr, 0);
             if(!re) perror("Sendfile");
         #else
-            send(timer->accept_fd, &file_size, sizeof(uint32_t), 0);
+            #if WORDS_BIGENDIAN
+                uint32_t little_fs = htonl(file_size);
+                send(timer->accept_fd, &little_fs sizeof(uint32_t), 0);
+            #else
+                send(timer->accept_fd, &file_size, sizeof(uint32_t), 0);
+            #endif
             re = sendfile(timer->accept_fd, fileno(fp), &len, file_size) >= 0;
             if(!re) perror("Sendfile");
         #endif

@@ -43,7 +43,7 @@ off_t size_of_file(const char* fname) {
     else return -1;
 }
 
-int main(int argc,char *argv[]) {   //usage: ./client host port [-d]
+int main(int argc,char *argv[]) {   //usage: ./client host port [-r]
     ssize_t numbytes;
     puts("break!");
     while((sockfd = socket(AF_INET,SOCK_STREAM,0)) == -1);
@@ -74,8 +74,8 @@ int main(int argc,char *argv[]) {   //usage: ./client host port [-d]
                 if(fp) {
                     off_t len = 0;
                     file_size = (uint32_t)size_of_file(buf);
-                    if(argc == 4) file_size = htonl(file_size);
                     #if __APPLE__
+                        if(argc == 4) file_size = htonl(file_size);
                         struct iovec headers;
                         headers.iov_base = &file_size;
                         headers.iov_len = sizeof(uint32_t);
@@ -86,7 +86,10 @@ int main(int argc,char *argv[]) {   //usage: ./client host port [-d]
                         if(!sendfile(fileno(fp), sockfd, 0, &len, &hdtr, 0)) puts("Send file success.");
                         else puts("Send file error.");
                     #else
-                        send(sockfd, &file_size, sizeof(uint32_t), 0);
+                        if(argc == 4) {
+                            uint32_t fs = htonl(file_size);
+                            send(sockfd, &fs, sizeof(uint32_t), 0);
+                        } else send(sockfd, &file_size, sizeof(uint32_t), 0);
                         if(!sendfile(sockfd, fileno(fp), &len, file_size)) puts("Send file success.");
                         else puts("Send file error.");
                     #endif

@@ -1,13 +1,13 @@
 project(simple-kanban)
-add_executable(simple-kanban server.c) # 生成可执行文件
-add_executable(simple-kanban-client client.c) # 生成可执行文件
-target_link_libraries(  # 目标库
-                        simple-kanban
- 
-                        # 目标库需要链接的库
-                        pthread)
-target_link_libraries(  # 目标库
-                        simple-kanban-client
- 
-                        # 目标库需要链接的库
-                        pthread)
+
+include(TestBigEndian)
+test_big_endian(isBigEndian)
+if (${isBigEndian})
+    set ( WORDS_BIGENDIAN 1 )
+endif()
+
+add_executable(simple-kanban server.c)
+add_executable(simple-kanban-client client.c)
+
+target_link_libraries(simple-kanban pthread)
+target_link_libraries(simple-kanban-client pthread)
