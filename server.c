@@ -145,9 +145,15 @@ int send_all(char* file_path, THREADTIMER *timer) {
             re = !sendfile(fileno(fp), timer->accept_fd, 0, &len, &hdtr, 0);
             if(!re) perror("Sendfile");
         #else
-            #if WORDS_BIGENDIAN
-                uint32_t little_fs = htonl(file_size);
-                send(timer->accept_fd, &little_fs sizeof(uint32_t), 0);
+            #ifdef WORDS_BIGENDIAN
+                uint32_t little_fs;
+                char* q = (char*)(&little_fs);
+                char* p = (char*)(&file_size);
+                q[0] = p[3];
+                q[1] = p[2];
+                q[2] = p[1];
+                q[3] = p[0];
+                send(timer->accept_fd, &little_fs, sizeof(uint32_t), 0);
             #else
                 send(timer->accept_fd, &file_size, sizeof(uint32_t), 0);
             #endif
@@ -219,7 +225,16 @@ int s2_set(THREADTIMER *timer) {
 
 int s3_set_data(THREADTIMER *timer) {
     timer->status = 0;
-    uint32_t file_size = *(uint32_t*)(timer->data);
+    #ifdef WORDS_BIGENDIAN
+        uint32_t file_size;
+        char* p = (char*)(&file_size);
+        p[0] = timer->data[3];
+        p[1] = timer->data[2];
+        p[2] = timer->data[1];
+        p[3] = timer->data[0];
+    #else
+        uint32_t file_size = *(uint32_t*)(timer->data);
+    #endif
     printf("Set data size: %u\n", file_size);
     int is_first_data = 0;
     if(timer->numbytes == sizeof(uint32_t)) {

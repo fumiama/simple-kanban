@@ -3,7 +3,7 @@ project(simple-kanban)
 include(TestBigEndian)
 test_big_endian(isBigEndian)
 if (${isBigEndian})
-    set ( WORDS_BIGENDIAN 1 )
+    add_definitions(-DWORDS_BIGENDIAN)
 endif()
 
 #add_definitions(-DLISTEN_ON_IPV6)
