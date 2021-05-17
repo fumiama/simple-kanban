@@ -1,0 +1,3 @@
+[submodule "simple-protobuf"]
+	path = simple-protobuf
+	url = https://github.com/fumiama/simple-protobuf.git
