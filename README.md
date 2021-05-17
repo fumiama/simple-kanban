@@ -24,10 +24,11 @@ make
 ## 0. 启动程序
 
 ```bash
-./simple-kanban [-d] 7777 1 ./kanban.txt ./data.bin
+./simple-kanban [-d] 7777 1 ./kanban.txt ./data.bin ./cfg.sp
 ```
 
-其中-d为可选项，如果添加，程序将以daemon状态运行。
+1. -d为可选项，如果添加，程序将以daemon状态运行。
+2. `cfg.sp`为配置文件，通过编译生成的`cfgwriter`生成
 
 ## 1. 建立连接
 
@@ -49,18 +50,18 @@ make
 
 ## 4. 设置看板
 
-- 发送：set
-- 返回：set
-- 发送：ver+`SETPASS`
+- 发送：`SETPASS`
+- 返回：`SETPASS`
+- 发送：ver
 - 返回：data
 - 发送：头+新的看板
 - 返回：succ
 
 ## 5. 设置数据
 
-- 发送：set
-- 返回：set
-- 发送：dat+`SETPASS`
+- 发送：`SETPASS`
+- 返回：`SETPASS`
+- 发送：dat
 - 返回：data
 - 发送：头+新的数据
 - 返回：succ

@@ -13,14 +13,19 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <time.h>
+#include "simple-protobuf/simple_protobuf.h"
 
 #if !__APPLE__
     #include <sys/sendfile.h> 
 #endif
 
-#define PASSWORD "fumiama"
+struct CONFIG {
+    char pwd[64];  //password
+    char sps[64];  //set password
+};
+typedef struct CONFIG CONFIG;
 
-#define SETPASS "minamoto"
+CONFIG* cfg;
 
 int fd;
 
@@ -51,7 +56,7 @@ struct THREADTIMER {
 };
 typedef struct THREADTIMER THREADTIMER;
 
-#define showUsage(program) printf("Usage: %s [-d] listen_port try_times kanban_file data_file\n\t-d: As daemon\n", program)
+#define showUsage(program) printf("Usage: %s [-d] listen_port try_times kanban_file data_file config_file\n\t-d: As daemon\n", program)
 
 void accept_client();
 void accept_timer(void *p);
@@ -168,13 +173,13 @@ int send_all(char* file_path, THREADTIMER *timer) {
 }
 
 int sm1_pwd(THREADTIMER *timer) {
-    if(!strcmp(PASSWORD, timer->data)) timer->status = 0;
+    if(!strcmp(cfg->pwd, timer->data)) timer->status = 0;
     return !timer->status;
 }
 
 int s0_init(THREADTIMER *timer) {
     if(!strcmp("get", timer->data)) timer->status = 1;
-    else if(!strcmp("set" SETPASS, timer->data)) timer->status = 2;
+    else if(!strcmp(cfg->sps, timer->data)) timer->status = 2;
     else if(!strcmp("cat", timer->data)) return send_all(data_path, timer);
     else if(!strcmp("quit", timer->data)) return 0;
     return send_data(timer->accept_fd, timer->data, timer->numbytes);
@@ -380,11 +385,11 @@ void handle_accept(void *p) {
                 printf("Get %zd bytes: %s\n", timer_pointer_of(p)->numbytes, buff);
                 puts("Check buffer");
                 //处理部分粘连
-                take_word(p, PASSWORD);
+                take_word(p, cfg->pwd);
                 take_word(p, "get");
                 take_word(p, "cat");
                 take_word(p, "quit");
-                take_word(p, "set" SETPASS);
+                take_word(p, cfg->sps);
                 take_word(p, "ver");
                 take_word(p, "dat");
                 if(timer_pointer_of(p)->numbytes > 0) chkbuf(p);
@@ -459,7 +464,7 @@ void close_file(FILE *fp) {
 }
 
 int main(int argc, char *argv[]) {
-    if(argc != 5 && argc != 6) showUsage(argv[0]);
+    if(argc != 6 && argc != 7) showUsage(argv[0]);
     else {
         int port = 0;
         int as_daemon = !strcmp("-d", argv[1]);
@@ -481,8 +486,15 @@ int main(int argc, char *argv[]) {
                         if(fp) {
                             data_path = argv[as_daemon?5:4];
                             fclose(fp);
-                            if(bind_server(port, times)) if(listen_socket(times)) accept_client();
-                        }
+                            fp = NULL;
+                            fp = fopen(argv[as_daemon?6:5], "rb+");
+                            if(fp) {
+                                SIMPLE_PB* spb = get_pb(fp);
+                                cfg = spb->target;
+                                fclose(fp);
+                                if(bind_server(port, times)) if(listen_socket(times)) accept_client();
+                            } else printf("Error opening config file: %s\n", argv[as_daemon?6:5]);
+                        } else printf("Error opening data file: %s\n", argv[as_daemon?5:4]);
                     } else printf("Error opening kanban file: %s\n", argv[as_daemon?4:3]);
                 } else puts("Start daemon error");
             } else printf("Error times: %d\n", times);
