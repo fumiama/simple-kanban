@@ -490,7 +490,7 @@ int main(int argc, char *argv[]) {
                             fp = fopen(argv[as_daemon?6:5], "rb+");
                             if(fp) {
                                 SIMPLE_PB* spb = get_pb(fp);
-                                cfg = spb->target;
+                                cfg = (CONFIG*)spb->target;
                                 fclose(fp);
                                 if(bind_server(port, times)) if(listen_socket(times)) accept_client();
                             } else printf("Error opening config file: %s\n", argv[as_daemon?6:5]);
