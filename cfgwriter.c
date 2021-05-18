@@ -10,22 +10,12 @@ typedef struct CONFIG CONFIG;
 
 CONFIG cfg;
 
-uint64_t items_len[2] = {sizeof(cfg.pwd), sizeof(cfg.sps)};
-uint8_t types_len[2];
-
 int main() {
     printf("Enter a password: ");
     scanf("%s", cfg.pwd);
     printf("Enter a set password: ");
     scanf("%s", cfg.sps);
-    for(int i = 0; i < 2; i++) {
-        types_len[i] = first_set(items_len[i]);
-        printf("Item %d has type %d with size %llu\n", i, types_len[i], items_len[i]);
-    }
-    /*align_struct(types_len, 2, sizeof(CONFIG));
-    for(int i = 0; i < 5; i++) {
-        printf("Item %d's type after align: %u\n", i, types_len[i]);
-    }*/
+    uint64_t* types_len = align_struct(sizeof(CONFIG), 2, &cfg.pwd, &cfg.sps);
     FILE* fp = fopen("cfg.sp", "wb");
     if(fp) {
         set_pb(fp, types_len, sizeof(CONFIG), &cfg);
