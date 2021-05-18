@@ -12,7 +12,6 @@ add_definitions(-DLISTEN_ON_IPV6)
 add_executable(simple-kanban server.c)
 add_executable(simple-kanban-client client.c)
 add_executable(cfgwriter cfgwriter.c)
-add_library(spb SHARED simple-protobuf/protobuf.c)
 
 target_link_libraries(simple-kanban spb pthread)
 target_link_libraries(simple-kanban-client pthread)
