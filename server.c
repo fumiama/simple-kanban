@@ -13,8 +13,8 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <time.h>
+#include <simple_protobuf.h>
 #include "config.h"
-#include "simple-protobuf/simple_protobuf.h"
 
 #if !__APPLE__
     #include <sys/sendfile.h> 
