@@ -1,12 +1,7 @@
 #include <stdio.h>
 #include <string.h>
+#include "config.h"
 #include "simple-protobuf/simple_protobuf.h"
-
-struct CONFIG {
-    char pwd[64];  //password
-    char sps[64];  //set password
-};
-typedef struct CONFIG CONFIG;
 
 CONFIG cfg;
 
@@ -19,13 +14,14 @@ int main() {
     FILE* fp = fopen("cfg.sp", "wb");
     if(fp) {
         set_pb(fp, types_len, sizeof(CONFIG), &cfg);
-        memset(&cfg, 0, sizeof(CONFIG));
         fclose(fp);
-        puts("Write file succeed.");
+        puts("Config is saved to cfg.sp.");
         fp = NULL;
+        puts("Check config...");
         fp = fopen("cfg.sp", "rb");
         if(fp) {
             SIMPLE_PB* spb = get_pb(fp);
+            memset(&cfg, 0, sizeof(CONFIG));
             memcpy(&cfg, spb->target, sizeof(CONFIG));
             printf("set pwd: %s, sps: %s\n", cfg.pwd, cfg.sps);
         } else perror("[SPB]");

@@ -13,17 +13,12 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <time.h>
+#include "config.h"
 #include "simple-protobuf/simple_protobuf.h"
 
 #if !__APPLE__
     #include <sys/sendfile.h> 
 #endif
-
-struct CONFIG {
-    char pwd[64];  //password
-    char sps[64];  //set password
-};
-typedef struct CONFIG CONFIG;
 
 CONFIG* cfg;
 
@@ -250,16 +245,17 @@ int s3_set_data(THREADTIMER *timer) {
             printf("Get data size: %tu\n", timer->numbytes);
         }
     }
-    if(file_size <= BUFSIZ - (is_first_data?0:sizeof(uint32_t))) {
-        while(timer->numbytes != file_size - (is_first_data?0:sizeof(uint32_t))) {
-            timer->numbytes += recv(timer->accept_fd, timer->data + timer->numbytes + (is_first_data?0:sizeof(uint32_t)), BUFSIZ - timer->numbytes - (is_first_data?0:sizeof(uint32_t)), 0);
+    size_t offset = (is_first_data?0:sizeof(uint32_t));
+    if(file_size <= BUFSIZ - offset) {
+        while(timer->numbytes != file_size - offset) {
+            timer->numbytes += recv(timer->accept_fd, timer->data + timer->numbytes + offset, BUFSIZ - timer->numbytes - offset, 0);
         }
-        if(fwrite(timer->data + (is_first_data?0:sizeof(uint32_t)), file_size, 1, timer->fp) != 1) {
+        if(fwrite(timer->data + offset, file_size, 1, timer->fp) != 1) {
             puts("Set data error.");
             return close_file_and_send(timer, "erro", 4);
         } else return close_file_and_send(timer, "succ", 4);
     } else {
-        if(fwrite(timer->data + (is_first_data?0:sizeof(uint32_t)), timer->numbytes - (is_first_data?0:sizeof(uint32_t)), 1, timer->fp) != 1) {
+        if(fwrite(timer->data + offset, timer->numbytes - offset, 1, timer->fp) != 1) {
             puts("Set data error.");
             return close_file_and_send(timer, "erro", 4);
         }
