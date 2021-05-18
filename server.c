@@ -483,7 +483,7 @@ int main(int argc, char *argv[]) {
                             data_path = argv[as_daemon?5:4];
                             fclose(fp);
                             fp = NULL;
-                            fp = fopen(argv[as_daemon?6:5], "rb+");
+                            fp = fopen(argv[as_daemon?6:5], "rb");
                             if(fp) {
                                 SIMPLE_PB* spb = get_pb(fp);
                                 cfg = (CONFIG*)spb->target;
