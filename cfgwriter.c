@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
+#include <simple_protobuf.h>
 #include "config.h"
-#include "simple-protobuf/simple_protobuf.h"
 
 CONFIG cfg;
 
