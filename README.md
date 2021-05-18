@@ -1,6 +1,18 @@
 # simple-kanban
 基于C语言Socket编程的简易公告发布程序
 
+# 准备工作
+
+您需要首先安装[simple-protobuf](https://github.com/fumiama/simple-protobuf)，并记住安装路径。如果安装路径不是`/usr/local`，需要手动更改`CMakeLists.txt`的路径指向正确位置。
+```bash
+git clone https://github.com/fumiama/simple-protobuf.git
+cd simple-protobuf
+cd build
+cmake ..
+make
+make install
+```
+
 # 编译
 
 仅适用于类`unix`系统（包括Apple），`windows`下编译请自行将`socket`实现替换为`winsock`
@@ -10,7 +22,7 @@ git clone https://github.com/fumiama/simple-kanban.git
 cd simple-kanban
 mkdir build
 cd build
-cmake ../
+cmake ..
 make
 ```
 
