@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 2.6)
 project(simple-kanban C)
+SET(CMAKE_BUILD_TYPE "Release")
 
 include(TestBigEndian)
 test_big_endian(isBigEndian)
