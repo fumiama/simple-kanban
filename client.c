@@ -27,7 +27,7 @@ int recv_bin = 0;
 void getMessage(void *p) {
     int c = 0;
     while((c = recv(sockfd, bufr, BUFSIZ, 0)) > 0) {
-        printf("Recv %d bytes: ", c);
+        printf("Recv %u bytes: ", c);
         if(recv_bin) {
             FILE* fp = fopen("dump.bin", "w+");
             fwrite(bufr, c, 1, fp);
@@ -90,7 +90,7 @@ int main(int argc,char *argv[]) {   //usage: ./client host port
                         else puts("Send file error.");
                     #endif
                     fclose(fp);
-                    printf("Send count:%lld\n", len);
+                    printf("Send count:%u\n", len);
                 } else puts("Open file error!");
             } else {
                 send(sockfd, buf, strlen(buf), 0);

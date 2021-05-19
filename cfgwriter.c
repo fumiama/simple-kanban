@@ -10,7 +10,7 @@ int main() {
     scanf("%s", cfg.pwd);
     printf("Enter a set password: ");
     scanf("%s", cfg.sps);
-    uint64_t* types_len = align_struct(sizeof(CONFIG), 2, &cfg.pwd, &cfg.sps);
+    uint32_t* types_len = align_struct(sizeof(CONFIG), 2, &cfg.pwd, &cfg.sps);
     FILE* fp = fopen("cfg.sp", "wb");
     if(fp) {
         set_pb(fp, types_len, sizeof(CONFIG), &cfg);

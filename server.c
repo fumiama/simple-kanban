@@ -1,19 +1,19 @@
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/stat.h>
-#include <sys/signal.h>
-#include <sys/file.h>
-#include <sys/wait.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <netinet/in.h>
+#include <pthread.h>
+#include <signal.h>
+#include <simple_protobuf.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <pthread.h>
+#include <sys/file.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <time.h>
-#include <simple_protobuf.h>
+#include <unistd.h>
 #include "config.h"
 
 #if !__APPLE__
@@ -160,7 +160,7 @@ int send_all(char* file_path, THREADTIMER *timer) {
             re = sendfile(timer->accept_fd, fileno(fp), &len, file_size) >= 0;
             if(!re) perror("Sendfile");
         #endif
-        printf("Send %lld bytes.\n", len);
+        printf("Send %uF bytes.\n", len);
         close_file(fp);
         timer->is_open = 0;
     }
@@ -378,7 +378,7 @@ void handle_accept(void *p) {
             while(*(timer_pointer_of(p)->thread) && (timer_pointer_of(p)->numbytes = recv(accept_fd, buff, BUFSIZ, 0)) > 0) {
                 touch_timer(p);
                 buff[timer_pointer_of(p)->numbytes] = 0;
-                printf("Get %zd bytes: %s\n", timer_pointer_of(p)->numbytes, buff);
+                printf("Get %u bytes: %s\n", timer_pointer_of(p)->numbytes, buff);
                 puts("Check buffer");
                 //处理部分粘连
                 take_word(p, cfg->pwd);
@@ -390,7 +390,7 @@ void handle_accept(void *p) {
                 take_word(p, "dat");
                 if(timer_pointer_of(p)->numbytes > 0) chkbuf(p);
             }
-            printf("Break: recv %zd bytes\n", timer_pointer_of(p)->numbytes);
+            printf("Break: recv %u bytes\n", timer_pointer_of(p)->numbytes);
         } else puts("Error allocating buffer");
         *(timer_pointer_of(p)->thread) = 0;
         kill_thread(timer_pointer_of(p));
