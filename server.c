@@ -17,7 +17,10 @@
 #include "config.h"
 
 #if !__APPLE__
-    #include <sys/sendfile.h> 
+    #include <sys/sendfile.h>
+    #include <endian.h>
+#else
+    #include <machine/endian.h>
 #endif
 
 CONFIG* cfg;
@@ -133,7 +136,9 @@ int send_all(char* file_path, THREADTIMER *timer) {
         printf("Get file size: %u bytes.\n", file_size);
         off_t len = 0;
         #if __APPLE__
-            //苹果基本没有大端，不作处理
+            #ifdef WORDS_BIGENDIAN
+                file_size = __DARWIN_OSSwapInt32(file_size);
+            #endif
             struct sf_hdtr hdtr;
             struct iovec headers;
             headers.iov_base = &file_size;
@@ -146,21 +151,15 @@ int send_all(char* file_path, THREADTIMER *timer) {
             if(!re) perror("Sendfile");
         #else
             #ifdef WORDS_BIGENDIAN
-                uint32_t little_fs;
-                char* q = (char*)(&little_fs);
-                char* p = (char*)(&file_size);
-                q[0] = p[3];
-                q[1] = p[2];
-                q[2] = p[1];
-                q[3] = p[0];
+                uint32_t little_fs = __builtin_bswap32(file_size);
                 send(timer->accept_fd, &little_fs, sizeof(uint32_t), 0);
             #else
                 send(timer->accept_fd, &file_size, sizeof(uint32_t), 0);
             #endif
-            re = sendfile(timer->accept_fd, fileno(fp), &len, file_size) >= 0;
+            re = !sendfile(timer->accept_fd, fileno(fp), &len, file_size) >= 0;
             if(!re) perror("Sendfile");
         #endif
-        printf("Send %uF bytes.\n", len);
+        printf("Send %u bytes.\n", len);
         close_file(fp);
         timer->is_open = 0;
     }
@@ -226,12 +225,7 @@ int s2_set(THREADTIMER *timer) {
 int s3_set_data(THREADTIMER *timer) {
     timer->status = 0;
     #ifdef WORDS_BIGENDIAN
-        uint32_t file_size;
-        char* p = (char*)(&file_size);
-        p[0] = timer->data[3];
-        p[1] = timer->data[2];
-        p[2] = timer->data[1];
-        p[3] = timer->data[0];
+        uint32_t file_size = __builtin_bswap32(*(uint32_t*)(timer->data));
     #else
         uint32_t file_size = *(uint32_t*)(timer->data);
     #endif

@@ -56,3 +56,5 @@ build
 .vscode/settings.json
 
 .DS_Store
+test.c
+test
