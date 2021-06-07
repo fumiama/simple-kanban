@@ -6,7 +6,7 @@
 您需要首先安装[simple-protobuf](https://github.com/fumiama/simple-protobuf)，并记住安装路径。如果安装路径不是`/usr/local`，需要手动更改`CMakeLists.txt`的路径指向正确位置。
 ```bash
 git clone https://github.com/fumiama/simple-protobuf.git
-cd simple-protobuf
+mkdir build
 cd build
 cmake ..
 make
@@ -24,6 +24,7 @@ mkdir build
 cd build
 cmake ..
 make
+make install
 ```
 
 # 数据格式
@@ -36,7 +37,7 @@ make
 ## 0. 启动程序
 
 ```bash
-./simple-kanban [-d] 7777 1 ./kanban.txt ./data.bin ./cfg.sp
+simple-kanban [-d] 7777 1 ./kanban.txt ./data.bin ./cfg.sp
 ```
 
 1. -d为可选项，如果添加，程序将以daemon状态运行。
@@ -62,8 +63,8 @@ make
 
 ## 4. 设置看板
 
-- 发送：`SETPASS`
-- 返回：`SETPASS`
+- 发送：set`SETPASS`
+- 返回：set`SETPASS`
 - 发送：ver
 - 返回：data
 - 发送：头+新的看板
@@ -71,8 +72,8 @@ make
 
 ## 5. 设置数据
 
-- 发送：`SETPASS`
-- 返回：`SETPASS`
+- 发送：set`SETPASS`
+- 返回：set`SETPASS`
 - 发送：dat
 - 返回：data
 - 发送：头+新的数据
