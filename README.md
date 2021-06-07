@@ -63,8 +63,8 @@ simple-kanban [-d] 7777 1 ./kanban.txt ./data.bin ./cfg.sp
 
 ## 4. 设置看板
 
-- 发送：set`SETPASS`
-- 返回：set`SETPASS`
+- 发送：`SETPASS`
+- 返回：`SETPASS`
 - 发送：ver
 - 返回：data
 - 发送：头+新的看板
@@ -72,8 +72,8 @@ simple-kanban [-d] 7777 1 ./kanban.txt ./data.bin ./cfg.sp
 
 ## 5. 设置数据
 
-- 发送：set`SETPASS`
-- 返回：set`SETPASS`
+- 发送：`SETPASS`
+- 返回：`SETPASS`
 - 发送：dat
 - 返回：data
 - 发送：头+新的数据
