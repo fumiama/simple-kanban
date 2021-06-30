@@ -106,3 +106,10 @@ simple-kanban [-d] 7777 1 ./kanban.txt ./data.bin ./cfg.sp
 键入：quit
 
 回车即可
+
+# 上传小工具
+在`uploader`文件夹有一个上传小工具，用法如下
+
+```bash
+./push_dmzj.sh ip port kanban.txt data.bin password setpass
+```

@@ -22,3 +22,4 @@ target_link_libraries(simple-kanban-client pthread)
 target_link_libraries(cfgwriter spb)
 
 INSTALL(TARGETS simple-kanban RUNTIME DESTINATION bin)
+INSTALL(TARGETS simple-kanban-client RUNTIME DESTINATION bin)
