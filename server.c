@@ -28,11 +28,13 @@ CONFIG* cfg;
 int fd;
 
 #ifdef LISTEN_ON_IPV6
-    socklen_t struct_len = sizeof(struct sockaddr_in6);
-    struct sockaddr_in6 server_addr;
+    static socklen_t struct_len = sizeof(struct sockaddr_in6);
+    static struct sockaddr_in6 server_addr;
+    static struct sockaddr_in6 client_addr;
 #else
-    socklen_t struct_len = sizeof(struct sockaddr_in);
-    struct sockaddr_in server_addr;
+    static socklen_t struct_len = sizeof(struct sockaddr_in);
+    static struct sockaddr_in server_addr;
+    static struct sockaddr_in client_addr;
 #endif
 
 char *data_path;
@@ -40,6 +42,8 @@ char *kanban_path;
 
 #define THREADCNT 16
 pthread_t accept_threads[THREADCNT];
+
+static pthread_attr_t attr;
 
 #define MAXWAITSEC 10
 struct THREADTIMER {
@@ -58,7 +62,7 @@ typedef struct THREADTIMER THREADTIMER;
 
 void accept_client();
 void accept_timer(void *p);
-int bind_server(uint16_t port, u_int try_times);
+int bind_server(uint16_t port, uint32_t try_times);
 int check_buffer(THREADTIMER *timer);
 void close_file(FILE *fp);
 int close_file_and_send(THREADTIMER *timer, char *data, size_t numbytes);
@@ -66,7 +70,7 @@ void handle_accept(void *accept_fd_p);
 void handle_pipe(int signo);
 void handle_quit(int signo);
 void kill_thread(THREADTIMER* timer);
-int listen_socket(u_int try_times);
+int listen_socket(uint32_t try_times);
 FILE *open_file(char* file_path, int lock_type, char* mode);
 int send_all(char* file_path, THREADTIMER *timer);
 int send_data(int accept_fd, char *data, size_t length);
@@ -77,7 +81,7 @@ int s1_get(THREADTIMER *timer);
 int s2_set(THREADTIMER *timer);
 int s3_set_data(THREADTIMER *timer);
 
-int bind_server(uint16_t port, u_int try_times) {
+int bind_server(uint16_t port, uint32_t try_times) {
     int fail_count = 0;
     int result = -1;
     #ifdef LISTEN_ON_IPV6
@@ -102,7 +106,7 @@ int bind_server(uint16_t port, u_int try_times) {
     }
 }
 
-int listen_socket(u_int try_times) {
+int listen_socket(uint32_t try_times) {
     int fail_count = 0;
     int result = -1;
     while(!~(result = listen(fd, 10)) && fail_count++ < try_times) sleep(1);
@@ -295,7 +299,6 @@ void handle_quit(int signo) {
 #define touch_timer(x) timer_pointer_of(x)->touch = time(NULL)
 
 void accept_timer(void *p) {
-    pthread_detach(pthread_self());
     THREADTIMER *timer = timer_pointer_of(p);
     while(*(timer->thread) && !pthread_kill(*(timer->thread), 0)) {
         sleep(MAXWAITSEC / 4);
@@ -336,6 +339,7 @@ void kill_thread(THREADTIMER* timer) {
 
 void handle_pipe(int signo) {
     printf("Pipe error: %d\n", signo);
+    pthread_exit(NULL);
 }
 
 #define chkbuf(p) if(!check_buffer(timer_pointer_of(p))) break
@@ -355,14 +359,13 @@ void handle_pipe(int signo) {
                     }
 
 void handle_accept(void *p) {
-    pthread_detach(pthread_self());
     int accept_fd = timer_pointer_of(p)->accept_fd;
     if(accept_fd > 0) {
         puts("Connected to the client.");
         signal(SIGQUIT, handle_quit);
         signal(SIGPIPE, handle_pipe);
         pthread_t thread;
-        if (pthread_create(&thread, NULL, (void *)&accept_timer, p)) puts("Error creating timer thread");
+        if (pthread_create(&thread, &attr, (void *)&accept_timer, p)) puts("Error creating timer thread");
         else puts("Creating timer thread succeeded");
         send_data(accept_fd, "Welcome to simple kanban server.", 33);
         timer_pointer_of(p)->status = -1;
@@ -391,13 +394,18 @@ void handle_accept(void *p) {
     } else puts("Error accepting client");
 }
 
+static pid_t pid;
 void accept_client() {
-    pid_t pid = fork();
+    pid = fork();
     while (pid > 0) {      //主进程监控子进程状态，如果子进程异常终止则重启之
         wait(NULL);
         puts("Server subprocess exited. Restart...");
         pid = fork();
     }
+    signal(SIGQUIT, handle_quit);
+    signal(SIGPIPE, handle_pipe);
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, 1);
     if(pid < 0) puts("Error when forking a subprocess.");
     else while(1) {
         puts("Ready for accept, waitting...");
@@ -407,17 +415,31 @@ void accept_client() {
             printf("Run on thread No.%d\n", p);
             THREADTIMER *timer = malloc(sizeof(THREADTIMER));
             if(timer) {
-                struct sockaddr_in client_addr;
                 timer->accept_fd = accept(fd, (struct sockaddr *)&client_addr, &struct_len);
-                timer->thread = &accept_threads[p];
-                timer->touch = time(NULL);
-                timer->data = NULL;
-                timer->is_open = 0;
-                timer->fp = NULL;
-                signal(SIGQUIT, handle_quit);
-                signal(SIGPIPE, handle_pipe);
-                if (pthread_create(timer->thread, NULL, (void *)&handle_accept, timer)) puts("Error creating thread");
-                else puts("Creating thread succeeded");
+                if(timer->accept_fd <= 0) {
+                    free(timer);
+                    puts("Accept client error.");
+                } else {
+                    #ifdef LISTEN_ON_IPV6
+                        uint16_t port = ntohs(client_addr.sin6_port);
+                        struct in6_addr in = client_addr.sin6_addr;
+                        char str[INET6_ADDRSTRLEN];	// 46
+                        inet_ntop(AF_INET6, &in, str, sizeof(str));
+                    #else
+                        uint16_t port = ntohs(client_addr.sin_port);
+                        struct in_addr in = client_addr.sin_addr;
+                        char str[INET_ADDRSTRLEN];	// 16
+                        inet_ntop(AF_INET, &in, str, sizeof(str));
+                    #endif
+                    printf("Accept client %s:%u\n", str, port);
+                    timer->thread = &accept_threads[p];
+                    timer->touch = time(NULL);
+                    timer->data = NULL;
+                    timer->is_open = 0;
+                    timer->fp = NULL;
+                    if (pthread_create(timer->thread, &attr, (void *)&handle_accept, timer)) puts("Error creating thread");
+                    else puts("Creating thread succeeded");
+                }
             } else puts("Allocate timer error");
         } else {
             puts("Max thread cnt exceeded");
