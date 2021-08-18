@@ -44,7 +44,8 @@ simple-kanban [-d] 7777 1 ./kanban.txt ./data.bin ./cfg.sp
 ```
 
 1. -d为可选项，如果添加，程序将以daemon状态运行。
-2. `cfg.sp`为配置文件，通过编译生成的`cfgwriter`生成
+2. `cfg.sp`为配置文件，通过编译生成的`cfgwriter`生成。
+3. `kanban.txt`第一行可以为一串数字，指示版本号。如果无数字，则无条件发送看板。
 
 ### 1. 建立连接
 
