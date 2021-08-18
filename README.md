@@ -37,6 +37,8 @@ make install
 
 ## 服务端使用
 
+> 以下所有交互均可粘连，如：`PASSWORDget100quit`将实现建立连接+获得看板，`PASSWORDcatquit`将建立连接并获取数据。
+
 ### 0. 启动程序
 
 ```bash
@@ -82,6 +84,9 @@ simple-kanban [-d] 7777 1 ./kanban.txt ./data.bin ./cfg.sp
 - 返回：data
 - 发送：头+新的数据
 - 返回：succ
+
+### 6. 退出
+- 发送：quit
 
 ## 简易客户端使用
 
