@@ -25,14 +25,14 @@ uint32_t file_size;
 int recv_bin = 0;
 
 void getMessage(void *p) {
-    int c = 0;
+    int c, i;
     while((c = recv(sockfd, bufr, BUFSIZ, 0)) > 0) {
         printf("Recv %u bytes: ", c);
         if(recv_bin) {
             FILE* fp = fopen("dump.bin", "w+");
             fwrite(bufr, c, 1, fp);
             fclose(fp);
-        } else for(int i = 0; i < c; i++) putchar(bufr[i]);
+        } else for(i = 0; i < c; i++) putchar(bufr[i]);
         putchar('\n');
     }
 }
