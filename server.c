@@ -380,6 +380,7 @@ void handle_accept(void *p) {
                 //处理部分粘连
                 take_word(p, cfg->pwd);
                 take_word(p, "get");
+                take_word(p, "set");
                 take_word(p, "cat");
                 take_word(p, "quit");
                 take_word(p, cfg->sps);
