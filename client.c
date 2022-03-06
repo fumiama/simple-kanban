@@ -9,6 +9,7 @@
 #include <arpa/inet.h>
 #include <sys/stat.h>
 #include <pthread.h>
+#include <unistd.h>
 
 #if !__APPLE__
     #include <sys/sendfile.h> 
@@ -90,7 +91,7 @@ int main(int argc,char *argv[]) {   //usage: ./client host port
                         else puts("Send file error.");
                     #endif
                     fclose(fp);
-                    printf("Send count:%u\n", len);
+                    printf("Send count:%d\n", (int)len);
                 } else puts("Open file error!");
             } else {
                 send(sockfd, buf, strlen(buf), 0);
