@@ -321,7 +321,7 @@ static FILE *open_file(char* file_path, int lock_type, char* mode) {
         pthread_rwlock_unlock(&mu);
         return NULL;
     }
-    printf("Open file in mode %d\n", mode);
+    printf("Open file in mode %s\n", mode);
     return fp;
 }
 
