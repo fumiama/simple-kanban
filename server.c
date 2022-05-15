@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <simple_protobuf.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,7 +24,7 @@
     #include <machine/endian.h>
 #endif
 
-static CONFIG* cfg;        // 存储 pwd 和 sps
+static config_t* cfg;        // 存储 pwd 和 sps
 
 static int fd;             // server socket fd
 
@@ -49,7 +50,7 @@ static pthread_attr_t attr;
 // accept_timer 使用的结构体
 // 包含了本次 accept 的全部信息
 // 以方便退出后清理空间
-struct THREADTIMER {
+struct threadtimer_t {
     int index;          // 指向 accept_threads 某个槽位的下标
     time_t touch;       // 最后访问时间，与当前时间差超过 MAXWAITSEC 将由 timer 强行回收线程
     int accept_fd;      // 本次 accept 的 fd，会自行关闭或出错时由 timer 负责回收
@@ -59,30 +60,29 @@ struct THREADTIMER {
     FILE *fp;           // 本会话打开的文件，会自行关闭或出错时由 timer 负责回收
     char data[TIMERDATSZ];
 };
-typedef struct THREADTIMER THREADTIMER;
+typedef struct threadtimer_t threadtimer_t;
 
-#define showUsage(program) printf("Usage: %s [-d] listen_port try_times kanban_file data_file config_file\n\t-d: As daemon\n", program)
+#define show_usage(program) printf("Usage: %s [-d] listen_port kanban_file data_file config_file\n\t-d: As daemon\n", program)
 
 static void accept_client();
 static void accept_timer(void *p);
-static int bind_server(uint16_t port, int try_times);
-static int check_buffer(THREADTIMER *timer);
-static void clean_timer(THREADTIMER* timer);
+static int bind_server(uint16_t port);
+static int check_buffer(threadtimer_t *timer);
+static void clean_timer(threadtimer_t* timer);
 static void close_file(FILE *fp);
-static int close_file_and_send(THREADTIMER *timer, char *data, size_t numbytes);
+static int close_file_and_send(threadtimer_t *timer, char *data, size_t numbytes);
+static void exit_thread(int signo);
 static void handle_accept(void *accept_fd_p);
-static void handle_pipe(int signo);
-static void handle_quit(int signo);
-static int listen_socket(int try_times);
+static int listen_socket();
 static FILE *open_file(char* file_path, int lock_type, char* mode);
-static int send_all(char* file_path, THREADTIMER *timer);
+static int send_all(char* file_path, threadtimer_t *timer);
 static int send_data(int accept_fd, char *data, size_t length);
 static off_t size_of_file(const char* fname);
-static int sm1_pwd(THREADTIMER *timer);
-static int s0_init(THREADTIMER *timer);
-static int s1_get(THREADTIMER *timer);
-static int s2_set(THREADTIMER *timer);
-static int s3_set_data(THREADTIMER *timer);
+static int sm1_pwd(threadtimer_t *timer);
+static int s0_init(threadtimer_t *timer);
+static int s1_get(threadtimer_t *timer);
+static int s2_set(threadtimer_t *timer);
+static int s3_set_data(threadtimer_t *timer);
 
 static pid_t pid;
 /***************************************
@@ -102,13 +102,11 @@ static void accept_client() {
         puts("Server subprocess exited. Restart...");
         pid = fork();
     }
-    signal(SIGQUIT, handle_quit);
-    signal(SIGPIPE, handle_pipe);
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
     if(pid < 0) puts("Error when forking a subprocess.");
     else while(1) {
-        puts("Ready for accept, waitting...");
+        puts("\nReady for accept, waitting...");
         int p = 0;
         while(p < THREADCNT && accept_threads[p] && !pthread_kill(accept_threads[p], 0)) p++;
         if(p >= THREADCNT) {
@@ -117,7 +115,7 @@ static void accept_client() {
             continue;
         }
         printf("Next thread is No.%d\n", p);
-        THREADTIMER *timer = malloc(sizeof(THREADTIMER));
+        threadtimer_t *timer = malloc(sizeof(threadtimer_t));
         if(!timer) {
             puts("Allocate timer error");
             continue;
@@ -149,7 +147,7 @@ static void accept_client() {
     }
 }
 
-#define timer_ptr(x) ((THREADTIMER*)(x))
+#define timer_ptr(x) ((threadtimer_t*)(x))
 #define my_thread(timer) accept_threads[timer->index]
 /***************************************
  * accept_timer 是与 handle_accept 伴生的
@@ -163,11 +161,10 @@ static void accept_timer(void *p) {
         if(waitsec > MAXWAITSEC) break;
     }
     clean_timer(timer_ptr(p));
-    free(p); // 唯一 free 点
     puts("Timer has been freed");
 }
 
-static int bind_server(uint16_t port, int try_times) {
+static int bind_server(uint16_t port) {
     int fail_count = 0;
     int result = -1;
     #ifdef LISTEN_ON_IPV6
@@ -182,21 +179,15 @@ static int bind_server(uint16_t port, int try_times) {
         bzero(&(server_addr.sin_zero), 8);
         fd = socket(AF_INET, SOCK_STREAM, 0);
     #endif
-    while(!~(result = bind(fd, (struct sockaddr *)&server_addr, struct_len)) && fail_count++ < try_times) sleep(1);
-    if(!~result && fail_count >= try_times) {
-        puts("Bind server failure!");
-        return 0;
-    } else{
-        puts("Bind server success!");
-        return 1;
-    }
+    if(!~bind(fd, (struct sockaddr *)&server_addr, struct_len)) return 1;
+    return 0;
 }
 
 /***************************************
  * check_buffer 检查接收到的数据，结合
  * 当前会话所处状态决定接下来的处理流程
 ***************************************/
-static int check_buffer(THREADTIMER *timer) {
+static int check_buffer(threadtimer_t *timer) {
     printf("Status: %d\n", (int)timer->status);
     switch(timer->status) {
         case -1: return sm1_pwd(timer); break;
@@ -209,7 +200,7 @@ static int check_buffer(THREADTIMER *timer) {
 }
 
 // clean_timer 清理 timer
-static void clean_timer(THREADTIMER* timer) {
+static void clean_timer(threadtimer_t* timer) {
     puts("Start cleaning.");
     if(my_thread(timer)) {
         pthread_kill(my_thread(timer), SIGQUIT);
@@ -226,6 +217,7 @@ static void clean_timer(THREADTIMER* timer) {
         timer->accept_fd = 0;
         puts("Close accept.");
     }
+    free(timer);
     puts("Finish cleaning.");
 }
 
@@ -237,7 +229,7 @@ static void close_file(FILE *fp) {
     }
 }
 
-static int close_file_and_send(THREADTIMER *timer, char *data, size_t numbytes) {
+static int close_file_and_send(threadtimer_t *timer, char *data, size_t numbytes) {
     close_file(timer->fp);
     timer->is_open = 0;
     return send_data(timer->accept_fd, data, numbytes);
@@ -262,58 +254,52 @@ static int close_file_and_send(THREADTIMER *timer, char *data, size_t numbytes) 
 #define my_dat(x) (timer_ptr(x)->data)
 // handle_accept 初步解析指令，处理部分粘连
 static void handle_accept(void *p) {
-    if(my_fd(p) > 0) {
-        puts("Connected to the client.");
-        signal(SIGQUIT, handle_quit);
-        signal(SIGPIPE, handle_pipe);
-        pthread_t thread;
-        if (pthread_create(&thread, &attr, (void *)&accept_timer, p)) puts("Error creating timer thread");
-        else puts("Creating timer thread succeeded");
-        send_data(my_fd(p), "Welcome to simple kanban server.", 33);
-        timer_ptr(p)->status = -1;
-        while(my_thread(timer_ptr(p)) && (timer_ptr(p)->numbytes = recv(my_fd(p), my_dat(p), TIMERDATSZ, 0)) > 0) {
-            touch_timer(p);
-            my_dat(p)[timer_ptr(p)->numbytes] = 0;
-            printf("Get %d bytes: %s\n", (int)timer_ptr(p)->numbytes, my_dat(p));
-            puts("Check buffer");
-            //处理部分粘连
-            take_word(p, cfg->pwd, my_dat(p));
-            take_word(p, "get",    my_dat(p));
-            take_word(p, "set",    my_dat(p));
-            take_word(p, "cat",    my_dat(p));
-            take_word(p, "quit",   my_dat(p));
-            take_word(p, cfg->sps, my_dat(p));
-            take_word(p, "ver",    my_dat(p));
-            take_word(p, "dat",    my_dat(p));
-            if(timer_ptr(p)->numbytes > 0) chkbuf(p);
-        }
-        printf("Break: recv %d bytes\n", (int)timer_ptr(p)->numbytes);
-        my_thread(timer_ptr(p)) = 0;
-        clean_timer(timer_ptr(p));
-    } else puts("Error accepting client");
+    puts("Connected to the client.");
+    signal(SIGQUIT, exit_thread);
+    signal(SIGPIPE, exit_thread);
+    pthread_t thread;
+    if (pthread_create(&thread, &attr, (void *)&accept_timer, p)) {
+        puts("Error creating timer thread");
+        close(my_fd(p));
+        free(p);
+        return;
+    }
+    puts("Creating timer thread succeeded");
+    pthread_cleanup_push((void*)clean_timer, p);
+    send_data(my_fd(p), "Welcome to simple kanban server.", 33);
+    timer_ptr(p)->status = -1;
+    while(my_thread(timer_ptr(p)) && (timer_ptr(p)->numbytes = recv(my_fd(p), my_dat(p), TIMERDATSZ, 0)) > 0) {
+        touch_timer(p);
+        my_dat(p)[timer_ptr(p)->numbytes] = 0;
+        printf("Get %d bytes: %s\n", (int)timer_ptr(p)->numbytes, my_dat(p));
+        puts("Check buffer");
+        //处理部分粘连
+        take_word(p, cfg->pwd, my_dat(p));
+        take_word(p, "get",    my_dat(p));
+        take_word(p, "set",    my_dat(p));
+        take_word(p, "cat",    my_dat(p));
+        take_word(p, "quit",   my_dat(p));
+        take_word(p, cfg->sps, my_dat(p));
+        take_word(p, "ver",    my_dat(p));
+        take_word(p, "dat",    my_dat(p));
+        if(timer_ptr(p)->numbytes > 0) chkbuf(p);
+    }
+    printf("Break: recv %d bytes\n", (int)timer_ptr(p)->numbytes);
+    my_thread(timer_ptr(p)) = 0;
+    pthread_cleanup_pop(1);
 }
 
-static void handle_quit(int signo) {
-    perror("signal quit");
+static void exit_thread(int signo) {
+    printf("Signal %d", signo);
+    perror("");
     pthread_exit(NULL);
 }
 
-static void handle_pipe(int signo) {
-    perror("signal pipe");
-    pthread_exit(NULL);
-}
-
-static int listen_socket(int try_times) {
+static int listen_socket() {
     int fail_count = 0;
     int result = -1;
-    while(!~(result = listen(fd, 10)) && fail_count++ < try_times) sleep(1);
-    if(!~result && fail_count >= try_times) {
-        puts("Listen failed!");
-        return 0;
-    } else{
-        puts("Listening....");
-        return 1;
-    }
+    if(!~listen(fd, 10)) return 1;
+    return 0;
 }
 
 static FILE *open_file(char* file_path, int lock_type, char* mode) {
@@ -329,7 +315,7 @@ static FILE *open_file(char* file_path, int lock_type, char* mode) {
     return fp;
 }
 
-static int send_all(char* file_path, THREADTIMER *timer) {
+static int send_all(char* file_path, threadtimer_t *timer) {
     int re = 1;
     FILE *fp = open_file(file_path, LOCK_SH, "rb");
     if(fp) {
@@ -391,12 +377,12 @@ static off_t size_of_file(const char* fname) {
     else return -1;
 }
 
-static int sm1_pwd(THREADTIMER *timer) {
+static int sm1_pwd(threadtimer_t *timer) {
     if(!strcmp(cfg->pwd, timer->data)) timer->status = 0;
     return !timer->status;
 }
 
-static int s0_init(THREADTIMER *timer) {
+static int s0_init(threadtimer_t *timer) {
     if(!strcmp("get", timer->data)) timer->status = 1;
     else if(!strcmp(cfg->sps, timer->data)) timer->status = 2;
     else if(!strcmp("cat", timer->data)) return send_all(data_path, timer);
@@ -404,7 +390,7 @@ static int s0_init(THREADTIMER *timer) {
     return send_data(timer->accept_fd, timer->data, timer->numbytes);
 }
 
-static int s1_get(THREADTIMER *timer) {        //get kanban
+static int s1_get(threadtimer_t *timer) {        //get kanban
     FILE *fp = open_file(kanban_path, LOCK_SH, "rb");
     timer->status = 0;
     if(fp) {
@@ -429,7 +415,7 @@ static int s1_get(THREADTIMER *timer) {        //get kanban
     return close_file_and_send(timer, "null", 4);
 }
 
-static int s2_set(THREADTIMER *timer) {
+static int s2_set(threadtimer_t *timer) {
     FILE *fp = NULL;
     if(!strcmp(timer->data, "ver")) {
         fp = open_file(kanban_path, LOCK_EX, "wb");
@@ -447,7 +433,7 @@ static int s2_set(THREADTIMER *timer) {
     }
 }
 
-static int s3_set_data(THREADTIMER *timer) {
+static int s3_set_data(threadtimer_t *timer) {
     timer->status = 0;
     #ifdef WORDS_BIGENDIAN
         uint32_t file_size = __builtin_bswap32(*(uint32_t*)(timer->data));
@@ -494,42 +480,62 @@ static int s3_set_data(THREADTIMER *timer) {
 }
 
 int main(int argc, char *argv[]) {
-    if(argc != 6 && argc != 7) showUsage(argv[0]);
-    else {
-        int port = 0;
-        int as_daemon = !strcmp("-d", argv[1]);
-        sscanf(argv[as_daemon?2:1], "%d", &port);
-        if(port > 0 && port < 65536) {
-            int times = 0;
-            sscanf(argv[as_daemon?3:2], "%d", &times);
-            if(times > 0) {
-                if(!as_daemon || (as_daemon && (daemon(1, 1) >= 0))) {
-                    FILE *fp = NULL;
-                    fp = fopen(argv[as_daemon?4:3], "rb+");
-                    if(!fp) fp = fopen(argv[as_daemon?4:3], "wb+");
-                    if(fp) {
-                        kanban_path = argv[as_daemon?4:3];
-                        fclose(fp);
-                        fp = NULL;
-                        fp = fopen(argv[as_daemon?5:4], "rb+");
-                        if(!fp) fp = fopen(argv[as_daemon?5:4], "wb+");
-                        if(fp) {
-                            data_path = argv[as_daemon?5:4];
-                            fclose(fp);
-                            fp = NULL;
-                            fp = fopen(argv[as_daemon?6:5], "rb");
-                            if(fp) {
-                                SIMPLE_PB* spb = get_pb(fp);
-                                cfg = (CONFIG*)spb->target;
-                                fclose(fp);
-                                if(bind_server(port, times)) if(listen_socket(times)) accept_client();
-                            } else printf("Error opening config file: %s\n", argv[as_daemon?6:5]);
-                        } else printf("Error opening data file: %s\n", argv[as_daemon?5:4]);
-                    } else printf("Error opening kanban file: %s\n", argv[as_daemon?4:3]);
-                } else puts("Start daemon error");
-            } else printf("Error times: %d\n", times);
-        } else printf("Error port: %d\n", port);
+    if(argc != 5 && argc != 6) {
+        show_usage(argv[0]);
+        return 0;
     }
-    close(fd);
-    exit(EXIT_FAILURE);
+    int port = 0;
+    int as_daemon = !strcmp("-d", argv[1]);
+    sscanf(argv[as_daemon?2:1], "%d", &port);
+    if(port <= 0 || port >= 65536) {
+        printf("Error port: %d\n", port);
+        return 1;
+    }
+    if(as_daemon && daemon(1, 1) < 0) {
+        perror("Start daemon error");
+        return 2;
+    }
+    FILE *fp = NULL;
+    fp = fopen(argv[as_daemon?3:2], "rb+");
+    if(!fp) fp = fopen(argv[as_daemon?3:2], "wb+");
+    if(!fp) {
+        printf("Error opening kanban file: ");
+        perror(argv[as_daemon?3:2]);
+        return 3;
+    }
+    kanban_path = argv[as_daemon?3:2];
+    fclose(fp);
+    fp = NULL;
+    fp = fopen(argv[as_daemon?4:3], "rb+");
+    if(!fp) fp = fopen(argv[as_daemon?4:3], "wb+");
+    if(!fp) {
+        printf("Error opening data file: ");
+        perror(argv[as_daemon?4:3]);
+        return 4;
+    }
+    data_path = argv[as_daemon?4:3];
+    fclose(fp);
+    fp = NULL;
+    fp = fopen(argv[as_daemon?5:4], "rb");
+    if(!fp) {
+        printf("Error opening config file: ");
+        perror(argv[as_daemon?5:4]);
+        return 5;
+    }
+    SIMPLE_PB* spb = get_pb(fp);
+    cfg = (config_t*)spb->target;
+    fclose(fp);
+    if(bind_server(port)) {
+        perror("Bind server failed");
+        return 6;
+    }
+    puts("Bind server success!");
+    if(listen_socket()) {
+        perror("Listen failed");
+        return 7;
+    }
+    pthread_cleanup_push((void*)close, (void*)(uintptr_t)fd);
+    accept_client();
+    pthread_cleanup_pop(1);
+    return 99;
 }
