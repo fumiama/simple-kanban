@@ -45,6 +45,8 @@ static char *kanban_path;  // get 命令读取的文件位置
 static pthread_t accept_threads[THREADCNT];
 static pthread_attr_t attr;
 
+static pthread_rwlock_t mu;
+
 #define MAXWAITSEC 10
 #define TIMERDATSZ BUFSIZ
 // accept_timer 使用的结构体
@@ -208,8 +210,8 @@ static void clean_timer(threadtimer_t* timer) {
         puts("Kill thread.");
     }
     if(timer->is_open) {
-        close_file(timer->fp);
         timer->is_open = 0;
+        close_file(timer->fp);
         puts("Close file.");
     }
     if(timer->accept_fd) {
@@ -223,15 +225,13 @@ static void clean_timer(threadtimer_t* timer) {
 
 static void close_file(FILE *fp) {
     puts("Close file");
-    if(fp) {
-        flock(fileno(fp), LOCK_UN);
-        fclose(fp);
-    }
+    pthread_rwlock_unlock(&mu);
+    fclose(fp);
 }
 
 static int close_file_and_send(threadtimer_t *timer, char *data, size_t numbytes) {
-    close_file(timer->fp);
     timer->is_open = 0;
+    close_file(timer->fp);
     return send_data(timer->accept_fd, data, numbytes);
 }
 
@@ -304,14 +304,24 @@ static int listen_socket() {
 
 static FILE *open_file(char* file_path, int lock_type, char* mode) {
     FILE *fp = NULL;
-    fp = fopen(file_path, mode);
-    if(fp) {
-        if(!~flock(fileno(fp), lock_type | LOCK_NB)) {
-            perror("flock");
-            fp = NULL;
+    if(lock_type&LOCK_SH) {
+        if(pthread_rwlock_tryrdlock(&mu)) {
+            perror("rdlock");
+            return NULL;
         }
-        printf("Open file in mode %d\n", lock_type);
-    } else perror("fopen");
+    } else if(lock_type&LOCK_EX) {
+        if(pthread_rwlock_wrlock(&mu)) {
+            perror("wrlock");
+            return NULL;
+        }
+    }
+    fp = fopen(file_path, mode);
+    if(!fp) {
+        perror("fopen");
+        pthread_rwlock_unlock(&mu);
+        return NULL;
+    }
+    printf("Open file in mode %d\n", mode);
     return fp;
 }
 
@@ -319,6 +329,7 @@ static int send_all(char* file_path, threadtimer_t *timer) {
     int re = 1;
     FILE *fp = open_file(file_path, LOCK_SH, "rb");
     if(fp) {
+        pthread_cleanup_push((void*)&close_file, fp);
         timer->fp = fp;
         timer->is_open = 1;
         uint32_t file_size = (uint32_t)size_of_file(file_path);
@@ -349,8 +360,8 @@ static int send_all(char* file_path, threadtimer_t *timer) {
             if(!re) perror("sendfile");
         #endif
         printf("Send %d bytes.\n", (int)len);
-        close_file(fp);
         timer->is_open = 0;
+        pthread_cleanup_pop(1);
     }
     return re;
 }
@@ -400,14 +411,14 @@ static int s1_get(threadtimer_t *timer) {        //get kanban
         if(fscanf(fp, "%u", &ver) > 0) {
             if(sscanf(timer->data, "%u", &cli_ver) > 0) {
                 if(cli_ver < ver) {     //need to send a new kanban
-                    close_file(fp);
                     timer->is_open = 0;
+                    close_file(fp);
                     int r = send_all(kanban_path, timer);
                     if(strstr(timer->data, "quit") == timer->data + timer->numbytes - 4) {
                         puts("Found last cmd is quit.");
                         return 0;
                     }
-                    else return r;
+                    return r;
                 }
             }
         }
@@ -434,6 +445,7 @@ static int s2_set(threadtimer_t *timer) {
 }
 
 static int s3_set_data(threadtimer_t *timer) {
+    char ret[4] = "succ";
     timer->status = 0;
     #ifdef WORDS_BIGENDIAN
         uint32_t file_size = __builtin_bswap32(*(uint32_t*)(timer->data));
@@ -442,9 +454,12 @@ static int s3_set_data(threadtimer_t *timer) {
     #endif
     printf("Set data size: %u\n", file_size);
     int is_first_data = 0;
+    pthread_cleanup_push((void*)close_file, timer->fp);
     if(timer->numbytes == sizeof(uint32_t)) {
-        if((timer->numbytes = recv(timer->accept_fd, timer->data, TIMERDATSZ, 0)) <= 0) 
-            return close_file_and_send(timer, "erro", 4);
+        if((timer->numbytes = recv(timer->accept_fd, timer->data, TIMERDATSZ, 0)) <= 0) {
+            *(uint32_t*)ret = *(uint32_t*)"erro";
+            goto S3_RETURN;
+        }
         is_first_data = 1;
         printf("Get data size: %d\n", (int)timer->numbytes);
     }
@@ -452,31 +467,41 @@ static int s3_set_data(threadtimer_t *timer) {
     if(file_size <= TIMERDATSZ - offset) {
         while(timer->numbytes != file_size - offset) {
             ssize_t n = recv(timer->accept_fd, timer->data + timer->numbytes + offset, TIMERDATSZ - timer->numbytes - offset, MSG_WAITALL);
-            if(n <= 0) return close_file_and_send(timer, "erro", 4);
+            if(n <= 0) {
+                *(uint32_t*)ret = *(uint32_t*)"erro";
+                goto S3_RETURN;
+            }
             timer->numbytes += n;
         }
         if(fwrite(timer->data + offset, file_size, 1, timer->fp) != 1) {
             perror("fwrite");
-            return close_file_and_send(timer, "erro", 4);
+            *(uint32_t*)ret = *(uint32_t*)"erro";
         }
-        return close_file_and_send(timer, "succ", 4);
+        goto S3_RETURN;
     }
     if(fwrite(timer->data + offset, timer->numbytes - offset, 1, timer->fp) != 1) {
         perror("fwrite");
-        return close_file_and_send(timer, "erro", 4);
+        *(uint32_t*)ret = *(uint32_t*)"erro";
+        goto S3_RETURN;
     }
     int32_t remain = file_size - timer->numbytes;
     while(remain > 0) {
         // printf("remain:%d\n", (int)remain);
         ssize_t n = recv(timer->accept_fd, timer->data, (remain>TIMERDATSZ)?TIMERDATSZ:remain, MSG_WAITALL);
-        if(n <= 0) return close_file_and_send(timer, "erro", 4);
+        if(n <= 0) {
+            *(uint32_t*)ret = *(uint32_t*)"erro";
+            goto S3_RETURN;
+        }
         if(fwrite(timer->data, n, 1, timer->fp) != 1) {
             perror("fwrite");
-            return close_file_and_send(timer, "erro", 4);
+            *(uint32_t*)ret = *(uint32_t*)"erro";
+            goto S3_RETURN;
         }
         remain -= n;
     }
-    return close_file_and_send(timer, "succ", 4);
+    pthread_cleanup_pop(0);
+S3_RETURN:
+    return close_file_and_send(timer, ret, 4);
 }
 
 int main(int argc, char *argv[]) {
