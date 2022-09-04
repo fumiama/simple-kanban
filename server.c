@@ -71,7 +71,7 @@ static void accept_timer(void *p);
 static int bind_server(uint16_t port);
 static int check_buffer(threadtimer_t *timer);
 static void clean_timer(threadtimer_t* timer);
-static void close_file(FILE *fp);
+static void close_file(threadtimer_t *timer);
 static int close_file_and_send(threadtimer_t *timer, char *data, size_t numbytes);
 static void handle_accept(void *accept_fd_p);
 static void handle_int(int signo);
@@ -238,8 +238,7 @@ static void clean_timer(threadtimer_t* timer) {
         puts("Kill thread.");
     }
     if(timer->is_open) {
-        timer->is_open = 0;
-        close_file(timer->fp);
+        close_file(timer);
         puts("Close file.");
     }
     if(timer->accept_fd) {
@@ -251,15 +250,18 @@ static void clean_timer(threadtimer_t* timer) {
     puts("Finish cleaning.");
 }
 
-static void close_file(FILE *fp) {
-    puts("Close file");
-    pthread_rwlock_unlock(&mu);
-    fclose(fp);
+static void close_file(threadtimer_t *timer) {
+    if(timer->is_open && timer->fp != NULL) {
+        puts("Close file");
+        pthread_rwlock_unlock(&mu);
+        fclose(timer->fp);
+        timer->is_open = 0;
+        timer->fp = NULL;
+    }
 }
 
 static int close_file_and_send(threadtimer_t *timer, char *data, size_t numbytes) {
-    timer->is_open = 0;
-    close_file(timer->fp);
+    close_file(timer);
     return send_data(timer->accept_fd, data, numbytes);
 }
 
@@ -370,7 +372,7 @@ static int send_all(char* file_path, threadtimer_t *timer) {
     int re = 1;
     FILE *fp = open_file(file_path, LOCK_SH, "rb");
     if(fp) {
-        pthread_cleanup_push((void*)&close_file, fp);
+        pthread_cleanup_push((void*)&close_file, timer);
         timer->fp = fp;
         timer->is_open = 1;
         uint32_t file_size = (uint32_t)size_of_file(file_path);
@@ -453,7 +455,7 @@ static int s1_get(threadtimer_t *timer) {        //get kanban
             if(sscanf(timer->data, "%u", &cli_ver) > 0) {
                 if(cli_ver < ver) {     //need to send a new kanban
                     timer->is_open = 0;
-                    close_file(fp);
+                    close_file(timer);
                     int r = send_all(kanban_path, timer);
                     if(strstr(timer->data, "quit") == timer->data + timer->numbytes - 4) {
                         puts("Found last cmd is quit.");
@@ -500,7 +502,7 @@ static int s3_set_data(threadtimer_t *timer) {
     #endif
     printf("Set data size: %u\n", file_size);
     int is_first_data = 0;
-    pthread_cleanup_push((void*)close_file, timer->fp);
+    pthread_cleanup_push((void*)close_file, timer);
     if(timer->numbytes == sizeof(uint32_t)) {
         if((timer->numbytes = recv(timer->accept_fd, timer->data, TIMERDATSZ, 0)) <= 0) {
             *(uint32_t*)ret = *(uint32_t*)"erro";
