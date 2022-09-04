@@ -11,7 +11,7 @@ $kanban
 EOF
 echo md5:${md5val##* } | tr -d '\n' >> $3
 cat > cmd_seq.txt << EOF
-fumiamaset$6
+$5set$6
 dat
 file
 $4

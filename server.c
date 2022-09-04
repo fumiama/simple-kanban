@@ -269,8 +269,6 @@ static int close_file_and_send(threadtimer_t *timer, char *data, size_t numbytes
 // handle_accept 初步解析指令，处理部分粘连
 static void handle_accept(void *p) {
     puts("Connected to the client.");
-    signal(SIGQUIT, exit_thread);
-    signal(SIGPIPE, exit_thread);
     pthread_t thread;
     if (pthread_create(&thread, &attr, (void *)&accept_timer, p)) {
         puts("Error creating timer thread");
