@@ -170,7 +170,7 @@ static void accept_client() {
  * 线程，负责监控其会话状态，并在超时时杀死它
 ***************************************/
 static void accept_timer(void *p) {
-    threadtimer_t *timer = timer_pointer_of(p);
+    threadtimer_t *timer = timer_ptr(p);
     uint32_t index = timer->index;
     sigset_t mask;
 
@@ -179,11 +179,11 @@ static void accept_timer(void *p) {
     pthread_sigmask(SIG_BLOCK, &mask, NULL);
 
     sleep(MAXWAITSEC / 4);
-    while(timer->thread && !pthread_kill(timer->thread, 0)) {
+    while(my_thread(timer) && !pthread_kill(my_thread(timer), 0)) {
         time_t waitsec = time(NULL) - timer->touch;
         printf("Wait sec: %u, max: %u\n", (unsigned int)waitsec, MAXWAITSEC);
         if(waitsec > MAXWAITSEC) {
-            pthread_t thread = timer->thread;
+            pthread_t thread = my_thread(timer);
             if(thread) {
                 pthread_kill(thread, SIGQUIT);
                 puts("Kill thread");
