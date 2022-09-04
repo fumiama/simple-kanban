@@ -170,7 +170,7 @@ static void accept_client() {
  * 线程，负责监控其会话状态，并在超时时杀死它
 ***************************************/
 static void accept_timer(void *p) {
-    thread_timer_t *timer = timer_pointer_of(p);
+    threadtimer_t *timer = timer_pointer_of(p);
     uint32_t index = timer->index;
     sigset_t mask;
 
