@@ -73,8 +73,11 @@ static int check_buffer(threadtimer_t *timer);
 static void clean_timer(threadtimer_t* timer);
 static void close_file(FILE *fp);
 static int close_file_and_send(threadtimer_t *timer, char *data, size_t numbytes);
-static void exit_thread(int signo);
 static void handle_accept(void *accept_fd_p);
+static void handle_int(int signo);
+static void handle_pipe(int signo);
+static void handle_quit(int signo);
+static void handle_segv(int signo);
 static int listen_socket();
 static FILE *open_file(char* file_path, int lock_type, char* mode);
 static int send_all(char* file_path, threadtimer_t *timer);
@@ -98,16 +101,25 @@ static pid_t pid;
  * 未被释放的资源以防止内存泄漏
 ***************************************/
 static void accept_client() {
-    pid = fork();
+    /*pid_t pid = fork();
     while (pid > 0) {      // 主进程监控子进程状态，如果子进程异常终止则重启之
         wait(NULL);
         puts("Server subprocess exited. Restart...");
         pid = fork();
     }
+    while(pid < 0) {
+        perror("Error when forking a subprocess");
+        sleep(1);
+    }*/
+    signal(SIGINT,  handle_int);
+    signal(SIGQUIT, handle_quit);
+    signal(SIGKILL, handle_segv);
+    signal(SIGSEGV, handle_segv);
+    signal(SIGPIPE, handle_pipe);
+    signal(SIGTERM, handle_segv);
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    if(pid < 0) puts("Error when forking a subprocess.");
-    else while(1) {
+    while(1) {
         puts("\nReady for accept, waitting...");
         int p = 0;
         while(p < THREADCNT && accept_threads[p] && !pthread_kill(accept_threads[p], 0)) p++;
@@ -116,7 +128,6 @@ static void accept_client() {
             sleep(1);
             continue;
         }
-        printf("Next thread is No.%d\n", p);
         threadtimer_t *timer = malloc(sizeof(threadtimer_t));
         if(!timer) {
             puts("Allocate timer error");
@@ -139,13 +150,16 @@ static void accept_client() {
             char str[INET_ADDRSTRLEN];	// 16
             inet_ntop(AF_INET, &in, str, sizeof(str));
         #endif
-        printf("Accept client %s:%u\n", str, port);
+        time_t t = time(NULL);
+        printf("\n> %sAccept client %s:%u at slot No.%d\n", ctime(&t), str, port, p);
         timer->index = p;
         timer->touch = time(NULL);
         timer->is_open = 0;
         timer->fp = NULL;
-        if (pthread_create(&accept_threads[p], &attr, (void *)&handle_accept, timer)) perror("pthread_create");
-        else puts("Creating thread succeeded");
+        if (pthread_create(&accept_threads[p], &attr, (void *)&handle_accept, timer)) {
+            perror("pthread_create");
+            clean_timer(timer);
+        } else puts("Creating thread succeeded");
     }
 }
 
@@ -289,9 +303,24 @@ static void handle_accept(void *p) {
     pthread_cleanup_pop(1);
 }
 
-static void exit_thread(int signo) {
-    printf("Signal %d", signo);
-    perror("");
+static void handle_int(int signo) {
+    puts("Keyboard interrupted");
+    pthread_exit(NULL);
+}
+
+static void handle_pipe(int signo) {
+    puts("Pipe error, exit thread...");
+    pthread_exit(NULL);
+}
+
+static void handle_quit(int signo) {
+    puts("Handle sigquit");
+    pthread_exit(NULL);
+}
+
+static void handle_segv(int signo) {
+    puts("Handle kill/segv/term");
+    fflush(stdout);
     pthread_exit(NULL);
 }
 
