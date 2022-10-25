@@ -1,7 +1,7 @@
 #include <arpa/inet.h>
+#include <errno.h>
 #include <netdb.h>
 #include <netinet/in.h>
-#include <pthread.h>
 #include <signal.h>
 #include <simple_protobuf.h>
 #include <stdint.h>
@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/file.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -26,7 +27,7 @@
 
 static config_t* cfg;        // 存储 pwd 和 sps
 
-static int fd;             // server socket fd
+static int fd;               // server socket fd
 
 #ifdef LISTEN_ON_IPV6
     static socklen_t struct_len = sizeof(struct sockaddr_in6);
@@ -41,41 +42,47 @@ static int fd;             // server socket fd
 static char *data_path;    // cat 命令读取的文件位置
 static char *kanban_path;  // get 命令读取的文件位置
 
+static int file_mode = LOCK_UN;
+static int file_ro_cnt;
+
+// THREADCNT 在单线程中指监听队列/select队列长度
 #define THREADCNT 16
-static pthread_t accept_threads[THREADCNT];
-static pthread_attr_t attr;
 
-static pthread_rwlock_t mu;
-
-#define MAXWAITSEC 10
+#define MAXWAITSEC 16
 #define TIMERDATSZ BUFSIZ
+
+static struct timeval timeout = {MAXWAITSEC/4, 0};
+
 // accept_timer 使用的结构体
 // 包含了本次 accept 的全部信息
 // 以方便退出后清理空间
 struct threadtimer_t {
-    int index;          // 指向 accept_threads 某个槽位的下标
-    time_t touch;       // 最后访问时间，与当前时间差超过 MAXWAITSEC 将由 timer 强行回收线程
-    int accept_fd;      // 本次 accept 的 fd，会自行关闭或出错时由 timer 负责回收
+    int index;          // 自身位置
+    time_t touch;       // 最后访问时间，与当前时间差超过 MAXWAITSEC 将强行中断连接
+    int accept_fd;      // 本次 accept 的 fd
+    int lock_type;      // 打开文件类型
     ssize_t numbytes;   // 本次接收的数据长度
     char status;        // 本会话所处的状态
     char is_open;       // 标识 fp 是否正在使用
-    FILE *fp;           // 本会话打开的文件，会自行关闭或出错时由 timer 负责回收
+    FILE *fp;           // 本会话打开的文件
     char data[TIMERDATSZ];
 };
 typedef struct threadtimer_t threadtimer_t;
 
-#define show_usage(program) printf("Usage: %s [-d] listen_port kanban_file data_file config_file\n\t-d: As daemon\n", program)
+static threadtimer_t timers[THREADCNT];
+
+static fd_set rdfds, wrfds, erfds, tmpfds;
+
+#define show_usage(program) printf("Usage: %s (-d) port kanban.txt data.bin config.sp\n\t-d: As daemon\n", program)
 
 static void accept_client();
-static void accept_timer(void *p);
-static int bind_server(uint16_t port);
+static int bind_server(int* port);
 static int check_buffer(threadtimer_t *timer);
 static void clean_timer(threadtimer_t* timer);
 static void close_file(threadtimer_t *timer);
 static int close_file_and_send(threadtimer_t *timer, char *data, size_t numbytes);
-static void handle_accept(void *accept_fd_p);
+static int handle_accept(threadtimer_t* p);
 static void handle_int(int signo);
-static void handle_pipe(int signo);
 static void handle_quit(int signo);
 static void handle_segv(int signo);
 static int listen_socket();
@@ -89,7 +96,6 @@ static int s1_get(threadtimer_t *timer);
 static int s2_set(threadtimer_t *timer);
 static int s3_set_data(threadtimer_t *timer);
 
-static pid_t pid;
 /***************************************
  * accept_client 接受新连接，创建线程处理
  * 创建的线程入口点为 handle_accept
@@ -101,116 +107,133 @@ static pid_t pid;
  * 未被释放的资源以防止内存泄漏
 ***************************************/
 static void accept_client() {
-    /*pid_t pid = fork();
-    while (pid > 0) {      // 主进程监控子进程状态，如果子进程异常终止则重启之
-        wait(NULL);
-        puts("Server subprocess exited. Restart...");
-        pid = fork();
-    }
-    while(pid < 0) {
-        perror("Error when forking a subprocess");
-        sleep(1);
-    }*/
     signal(SIGINT,  handle_int);
     signal(SIGQUIT, handle_quit);
     signal(SIGKILL, handle_segv);
     signal(SIGSEGV, handle_segv);
-    signal(SIGPIPE, handle_pipe);
+    signal(SIGPIPE, SIG_IGN);
     signal(SIGTERM, handle_segv);
-    pthread_attr_init(&attr);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    FD_SET(fd, &rdfds);
+    FD_SET(fd, &erfds);
+    FD_SET(fd, &tmpfds);
+    puts("Ready for select, waitting...");
     while(1) {
-        puts("\nReady for accept, waitting...");
-        int p = 0;
-        while(p < THREADCNT && accept_threads[p] && !pthread_kill(accept_threads[p], 0)) p++;
-        if(p >= THREADCNT) {
-            puts("Max thread cnt exceeded");
-            sleep(1);
-            continue;
+        int r = select(THREADCNT+8, &rdfds, &wrfds, &erfds, &timeout);
+        if(r < 0) {
+            perror("select");
+            return;
         }
-        threadtimer_t *timer = malloc(sizeof(threadtimer_t));
-        if(!timer) {
-            puts("Allocate timer error");
-            continue;
-        }
-        timer->accept_fd = accept(fd, (struct sockaddr *)&client_addr, &struct_len);
-        if(timer->accept_fd <= 0) {
-            free(timer);
-            puts("Accept client error.");
-            continue;
-        }
-        #ifdef LISTEN_ON_IPV6
-            uint16_t port = ntohs(client_addr.sin6_port);
-            struct in6_addr in = client_addr.sin6_addr;
-            char str[INET6_ADDRSTRLEN];	// 46
-            inet_ntop(AF_INET6, &in, str, sizeof(str));
-        #else
-            uint16_t port = ntohs(client_addr.sin_port);
-            struct in_addr in = client_addr.sin_addr;
-            char str[INET_ADDRSTRLEN];	// 16
-            inet_ntop(AF_INET, &in, str, sizeof(str));
-        #endif
-        time_t t = time(NULL);
-        printf("\n> %sAccept client %s:%u at slot No.%d\n", ctime(&t), str, port, p);
-        timer->index = p;
-        timer->touch = time(NULL);
-        timer->is_open = 0;
-        timer->fp = NULL;
-        if (pthread_create(&accept_threads[p], &attr, (void *)&handle_accept, timer)) {
-            perror("pthread_create");
-            clean_timer(timer);
-        } else puts("Creating thread succeeded");
-    }
-}
-
-#define timer_ptr(x) ((threadtimer_t*)(x))
-#define my_thread(timer) accept_threads[timer->index]
-/***************************************
- * accept_timer 是与 handle_accept 伴生的
- * 线程，负责监控其会话状态，并在超时时杀死它
-***************************************/
-static void accept_timer(void *p) {
-    threadtimer_t *timer = timer_ptr(p);
-    uint32_t index = timer->index;
-    sigset_t mask;
-
-    sigemptyset(&mask);
-    sigaddset(&mask, SIGPIPE); // 防止处理嵌套
-    pthread_sigmask(SIG_BLOCK, &mask, NULL);
-
-    sleep(MAXWAITSEC / 4);
-    while(my_thread(timer) && !pthread_kill(my_thread(timer), 0)) {
-        time_t waitsec = time(NULL) - timer->touch;
-        printf("Wait sec: %u, max: %u\n", (unsigned int)waitsec, MAXWAITSEC);
-        if(waitsec > MAXWAITSEC) {
-            pthread_t thread = my_thread(timer);
-            if(thread) {
-                pthread_kill(thread, SIGQUIT);
-                puts("Kill thread");
+        if(r == 0) { // 超时
+            for(int i = 0; i < THREADCNT; i++) {
+                if(timers[i].touch && timers[i].accept_fd) {
+                    time_t waitsec = time(NULL) - timers[i].touch;
+                    if(waitsec > MAXWAITSEC) {
+                        printf("Close@%d, wait sec: %u, max: %u\n", i, (unsigned int)waitsec, MAXWAITSEC);
+                        clean_timer(&timers[i]);
+                    }
+                }
             }
-            break;
+            goto HANDLE_FINISH;
         }
-        sleep(MAXWAITSEC / 4);
+        puts("\nSelected");
+        // 正常
+        if(FD_ISSET(fd, &rdfds)) { // 有新连接
+            int p = 0;
+            while(p < THREADCNT && timers[p].touch) p++;
+            if(p >= THREADCNT) {
+                puts("Max thread cnt exceeded");
+                int nfd = accept(fd, (struct sockaddr *)&client_addr, &struct_len);
+                if(nfd > 0) close(nfd);
+                goto HANDLE_CLIENTS;
+            }
+            threadtimer_t* timer = &timers[p];
+            timer->accept_fd = accept(fd, (struct sockaddr *)&client_addr, &struct_len);
+            if(timer->accept_fd <= 0) {
+                perror("accept");
+                goto HANDLE_CLIENTS;
+            }
+            #ifdef LISTEN_ON_IPV6
+                uint16_t port = ntohs(client_addr.sin6_port);
+                struct in6_addr in = client_addr.sin6_addr;
+                char str[INET6_ADDRSTRLEN];	// 46
+                inet_ntop(AF_INET6, &in, str, sizeof(str));
+            #else
+                uint16_t port = ntohs(client_addr.sin_port);
+                struct in_addr in = client_addr.sin_addr;
+                char str[INET_ADDRSTRLEN];	// 16
+                inet_ntop(AF_INET, &in, str, sizeof(str));
+            #endif
+            time_t t = time(NULL);
+            printf("> %sAccept client(%d) %s:%u at slot No.%d, ", ctime(&t), timer->accept_fd, str, port, p);
+            timer->index = p;
+            timer->touch = time(NULL);
+            timer->is_open = 0;
+            timer->fp = NULL;
+            timer->status = -1;
+            FD_SET(timer->accept_fd, &tmpfds);
+            FD_SET(timer->accept_fd, &rdfds);
+            puts("Add new client into select list");
+        } else if(FD_ISSET(fd, &erfds)) { // 主套接字错误
+            int nfd = accept(fd, (struct sockaddr *)&client_addr, &struct_len);
+            perror("main fd in erfds");
+            if(nfd > 0) close(nfd);
+            return;
+        }
+        HANDLE_CLIENTS:
+        for(int i = 0; i < THREADCNT; i++) {
+            if(timers[i].touch && timers[i].accept_fd) {
+                if(FD_ISSET(timers[i].accept_fd, &rdfds)) {
+                    if(!handle_accept(&timers[i])) clean_timer(&timers[i]);
+                    else FD_SET(timers[i].accept_fd, &tmpfds);
+                } else if(FD_ISSET(timers[i].accept_fd, &erfds)) {
+                    printf("Close@%d due to error\n", i);
+                    clean_timer(&timers[i]);
+                }
+            }
+        }
+        HANDLE_FINISH:
+        FD_COPY(&tmpfds, &rdfds);
+        FD_COPY(&tmpfds, &erfds);
+        FD_ZERO(&tmpfds);
+        FD_SET(fd, &tmpfds);
     }
 }
 
-static int bind_server(uint16_t port) {
-    int fail_count = 0;
-    int result = -1;
+static int bind_server(int* port) {
     #ifdef LISTEN_ON_IPV6
         server_addr.sin6_family = AF_INET6;
-        server_addr.sin6_port = htons(port);
+        server_addr.sin6_port = htons((uint16_t)(*port));
         bzero(&(server_addr.sin6_addr), sizeof(server_addr.sin6_addr));
-        fd = socket(PF_INET6, SOCK_STREAM, 0);
+        int fd = socket(PF_INET6, SOCK_STREAM, 0);
     #else
         server_addr.sin_family = AF_INET;
-        server_addr.sin_port = htons(port);
+        server_addr.sin_port = htons((uint16_t)(*port));
         server_addr.sin_addr.s_addr = INADDR_ANY;
         bzero(&(server_addr.sin_zero), 8);
-        fd = socket(AF_INET, SOCK_STREAM, 0);
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
     #endif
-    if(!~bind(fd, (struct sockaddr *)&server_addr, struct_len)) return 1;
-    return 0;
+    int on = 1;
+    if(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on))) {
+        perror("Set socket option failure");
+        return 0;
+    }
+    if(!~bind(fd, (struct sockaddr *)&server_addr, struct_len)) {
+        perror("Bind server failure");
+        return 0;
+    }
+    #ifdef LISTEN_ON_IPV6
+        *port = ntohs(server_addr.sin6_port);
+        struct in6_addr in = server_addr.sin6_addr;
+        char str[INET6_ADDRSTRLEN];	// 46
+        inet_ntop(AF_INET6, &in, str, sizeof(str));
+    #else
+        *port = ntohs(server_addr.sin_port);
+        struct in_addr in = server_addr.sin_addr;
+        char str[INET_ADDRSTRLEN];	// 16
+        inet_ntop(AF_INET, &in, str, sizeof(str));
+    #endif
+    printf("Bind server successfully on %s:%u\n", str, *port);
+    return fd;
 }
 
 /***************************************
@@ -231,32 +254,36 @@ static int check_buffer(threadtimer_t *timer) {
 
 // clean_timer 清理 timer
 static void clean_timer(threadtimer_t* timer) {
-    puts("Start cleaning.");
-    if(my_thread(timer)) {
-        pthread_kill(my_thread(timer), SIGQUIT);
-        my_thread(timer) = 0;
-        puts("Kill thread.");
-    }
+    printf("Start cleaning: ");
     if(timer->is_open) {
         close_file(timer);
-        puts("Close file.");
+        printf("Close file, ");
     }
     if(timer->accept_fd) {
         close(timer->accept_fd);
         timer->accept_fd = 0;
-        puts("Close accept.");
+        printf("Close accept, ");
     }
-    free(timer);
+    FD_CLR(timer->accept_fd, &rdfds);
+    FD_CLR(timer->accept_fd, &erfds);
+    FD_CLR(timer->accept_fd, &tmpfds);
+    timer->touch = 0;
+    timer->status = -1;
     puts("Finish cleaning.");
 }
 
 static void close_file(threadtimer_t *timer) {
     if(timer->is_open && timer->fp != NULL) {
+        int lock_type = timer->lock_type;
         puts("Close file");
-        pthread_rwlock_unlock(&mu);
         fclose(timer->fp);
         timer->is_open = 0;
         timer->fp = NULL;
+        file_mode &= ~lock_type;
+        if((lock_type&LOCK_SH) > 0 && --file_ro_cnt > 0) {
+            file_mode |= LOCK_SH;
+        }
+        timer->lock_type = 0;
     }
 }
 
@@ -265,42 +292,32 @@ static int close_file_and_send(threadtimer_t *timer, char *data, size_t numbytes
     return send_data(timer->accept_fd, data, numbytes);
 }
 
-#define chkbuf(p) if(!check_buffer(timer_ptr(p))) break
-#define take_word(p, w, buff) if(timer_ptr(p)->numbytes > strlen(w) && strstr(buff, w) == buff) {\
+#define chkbuf(p) if(!(r = check_buffer((p)))) break
+#define take_word(p, w, buff) if((p)->numbytes > strlen(w) && strstr(buff, w) == buff) {\
                         int l = strlen(w);\
                         char store = buff[l];\
                         buff[l] = 0;\
-                        ssize_t n = timer_ptr(p)->numbytes - l;\
-                        timer_ptr(p)->numbytes = l;\
+                        ssize_t n = (p)->numbytes - l;\
+                        (p)->numbytes = l;\
                         chkbuf(p);\
                         buff[0] = store;\
                         memmove(buff + 1, buff + l + 1, n - 1);\
                         buff[n] = 0;\
-                        timer_ptr(p)->numbytes = n;\
+                        (p)->numbytes = n;\
                         printf("Split cmd: %s\n", w);\
                     }
-#define touch_timer(x) (timer_ptr(x)->touch = time(NULL))
-#define my_fd(x) (timer_ptr(x)->accept_fd)
-#define my_dat(x) (timer_ptr(x)->data)
+#define touch_timer(x) ((x)->touch = time(NULL))
+#define my_fd(x) ((x)->accept_fd)
+#define my_dat(x) ((x)->data)
 // handle_accept 初步解析指令，处理部分粘连
-static void handle_accept(void *p) {
-    puts("Connected to the client.");
-    pthread_t thread;
-    if (pthread_create(&thread, &attr, (void *)&accept_timer, p)) {
-        puts("Error creating timer thread");
-        close(my_fd(p));
-        free(p);
-        return;
-    }
-    puts("Creating timer thread succeeded");
-    pthread_cleanup_push((void*)clean_timer, p);
+static int handle_accept(threadtimer_t* p) {
+    int r = 1;
+    puts("Recv data from the client.");
     send_data(my_fd(p), "Welcome to simple kanban server.", 33);
-    timer_ptr(p)->status = -1;
-    while(my_thread(timer_ptr(p)) && (timer_ptr(p)->numbytes = recv(my_fd(p), my_dat(p), TIMERDATSZ, 0)) > 0) {
+    while(((p)->numbytes = recv(my_fd(p), my_dat(p), TIMERDATSZ, MSG_DONTWAIT)) > 0) {
         touch_timer(p);
-        my_dat(p)[timer_ptr(p)->numbytes] = 0;
-        printf("Get %d bytes: %s\n", (int)timer_ptr(p)->numbytes, my_dat(p));
-        puts("Check buffer");
+        my_dat(p)[(p)->numbytes] = 0;
+        printf("Get %d bytes: %s, Check buffer...\n", (int)(p)->numbytes, my_dat(p));
         //处理部分粘连
         take_word(p, cfg->pwd, my_dat(p));
         take_word(p, "get",    my_dat(p));
@@ -310,58 +327,59 @@ static void handle_accept(void *p) {
         take_word(p, cfg->sps, my_dat(p));
         take_word(p, "ver",    my_dat(p));
         take_word(p, "dat",    my_dat(p));
-        if(timer_ptr(p)->numbytes > 0) chkbuf(p);
+        if((p)->numbytes > 0)  chkbuf(p);
     }
-    printf("Break: recv %d bytes\n", (int)timer_ptr(p)->numbytes);
-    my_thread(timer_ptr(p)) = 0;
-    pthread_cleanup_pop(1);
+    puts("Recv finished");
+    return r;
 }
 
 static void handle_int(int signo) {
     puts("Keyboard interrupted");
-    pthread_exit(NULL);
-}
-
-static void handle_pipe(int signo) {
-    puts("Pipe error, exit thread...");
-    pthread_exit(NULL);
+    close(fd);
+    fflush(stdout);
+    exit(0);
 }
 
 static void handle_quit(int signo) {
     puts("Handle sigquit");
-    pthread_exit(NULL);
+    close(fd);
+    fflush(stdout);
+    exit(0);
 }
 
 static void handle_segv(int signo) {
     puts("Handle kill/segv/term");
+    close(fd);
     fflush(stdout);
-    pthread_exit(NULL);
+    exit(0);
 }
 
 static int listen_socket() {
-    int fail_count = 0;
-    int result = -1;
-    if(!~listen(fd, 10)) return 1;
-    return 0;
+    int flags = fcntl(fd, F_GETFL, 0);
+    if(!~listen(fd, THREADCNT)) return 1;
+    return fcntl(fd, F_SETFL, flags | O_NONBLOCK); 
 }
 
 static FILE *open_file(char* file_path, int lock_type, char* mode) {
     FILE *fp = NULL;
-    if(lock_type&LOCK_SH) {
-        if(pthread_rwlock_tryrdlock(&mu)) {
-            perror("rdlock");
+    if((lock_type&LOCK_SH)) {
+        if((file_mode&LOCK_EX) > 0) {
+            puts("open_file(SH): file is busy");
             return NULL;
         }
+        file_mode |= LOCK_SH;
+        file_ro_cnt++;
     } else if(lock_type&LOCK_EX) {
-        if(pthread_rwlock_wrlock(&mu)) {
-            perror("wrlock");
+        if((file_mode&(LOCK_EX|LOCK_SH)) > 0) {
+            puts("open_file(EX): file is busy");
             return NULL;
         }
+        file_mode |= LOCK_EX;
     }
     fp = fopen(file_path, mode);
     if(!fp) {
         perror("fopen");
-        pthread_rwlock_unlock(&mu);
+        file_mode &= ~lock_type;
         return NULL;
     }
     printf("Open file in mode %s\n", mode);
@@ -372,9 +390,9 @@ static int send_all(char* file_path, threadtimer_t *timer) {
     int re = 1;
     FILE *fp = open_file(file_path, LOCK_SH, "rb");
     if(fp) {
-        pthread_cleanup_push((void*)&close_file, timer);
         timer->fp = fp;
         timer->is_open = 1;
+        timer->lock_type = LOCK_SH;
         uint32_t file_size = (uint32_t)size_of_file(file_path);
         printf("Get file size: %d bytes.\n", (int)file_size);
         off_t len = 0;
@@ -391,7 +409,10 @@ static int send_all(char* file_path, threadtimer_t *timer) {
             hdtr.trailers = NULL;
             hdtr.trl_cnt = 0;
             re = !sendfile(fileno(fp), timer->accept_fd, 0, &len, &hdtr, 0);
-            if(!re) perror("sendfile");
+            if(!re) {
+                while(errno == EAGAIN) re = !sendfile(fileno(fp), timer->accept_fd, 0, &len, &hdtr, 0);
+                perror("sendfile");
+            }
         #else
             #ifdef WORDS_BIGENDIAN
                 uint32_t little_fs = __builtin_bswap32(file_size);
@@ -399,18 +420,20 @@ static int send_all(char* file_path, threadtimer_t *timer) {
             #else
                 send(timer->accept_fd, &file_size, sizeof(uint32_t), 0);
             #endif
-            re = !sendfile(timer->accept_fd, fileno(fp), &len, file_size) >= 0;
-            if(!re) perror("sendfile");
+            re = sendfile(timer->accept_fd, fileno(fp), &len, file_size) > 0;
+            if(!re) {
+                while(errno == EAGAIN) re = sendfile(timer->accept_fd, fileno(fp), &len, file_size) > 0;
+                perror("sendfile");
+            }
         #endif
         printf("Send %d bytes.\n", (int)len);
-        timer->is_open = 0;
-        pthread_cleanup_pop(1);
+        close_file(timer);
     }
     return re;
 }
 
 static int send_data(int accept_fd, char *data, size_t length) {
-    if(!~send(accept_fd, data, length, 0)) {
+    if(!~send(accept_fd, data, length, MSG_DONTWAIT)) {
         puts("Send data error");
         return 0;
     }
@@ -450,6 +473,7 @@ static int s1_get(threadtimer_t *timer) {        //get kanban
     if(fp) {
         timer->fp = fp;
         timer->is_open = 1;
+        timer->lock_type = LOCK_SH;
         uint32_t ver, cli_ver;
         if(fscanf(fp, "%u", &ver) > 0) {
             if(sscanf(timer->data, "%u", &cli_ver) > 0) {
@@ -485,6 +509,7 @@ static int s2_set(threadtimer_t *timer) {
         timer->status = 3;
         timer->fp = fp;
         timer->is_open = 1;
+        timer->lock_type = LOCK_EX;
         return send_data(timer->accept_fd, "data", 4);
     } else {
         timer->status = 0;
@@ -502,7 +527,6 @@ static int s3_set_data(threadtimer_t *timer) {
     #endif
     printf("Set data size: %u\n", file_size);
     int is_first_data = 0;
-    pthread_cleanup_push((void*)close_file, timer);
     if(timer->numbytes == sizeof(uint32_t)) {
         if((timer->numbytes = recv(timer->accept_fd, timer->data, TIMERDATSZ, 0)) <= 0) {
             *(uint32_t*)ret = *(uint32_t*)"erro";
@@ -547,7 +571,6 @@ static int s3_set_data(threadtimer_t *timer) {
         }
         remain -= n;
     }
-    pthread_cleanup_pop(0);
 S3_RETURN:
     return close_file_and_send(timer, ret, 4);
 }
@@ -560,7 +583,7 @@ int main(int argc, char *argv[]) {
     int port = 0;
     int as_daemon = !strcmp("-d", argv[1]);
     sscanf(argv[as_daemon?2:1], "%d", &port);
-    if(port <= 0 || port >= 65536) {
+    if(port < 0 || port >= 65536) {
         printf("Error port: %d\n", port);
         return 1;
     }
@@ -598,17 +621,14 @@ int main(int argc, char *argv[]) {
     SIMPLE_PB* spb = get_pb(fp);
     cfg = (config_t*)spb->target;
     fclose(fp);
-    if(bind_server(port)) {
-        perror("Bind server failed");
+    if(!(fd = bind_server(&port))) {
         return 6;
     }
-    puts("Bind server success!");
     if(listen_socket()) {
         perror("Listen failed");
         return 7;
     }
-    pthread_cleanup_push((void*)close, (void*)(uintptr_t)fd);
     accept_client();
-    pthread_cleanup_pop(1);
+    close(fd);
     return 99;
 }

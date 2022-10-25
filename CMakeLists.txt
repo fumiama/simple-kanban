@@ -17,7 +17,7 @@ add_executable(simple-kanban server.c)
 add_executable(simple-kanban-client client.c)
 add_executable(cfgwriter cfgwriter.c)
 
-target_link_libraries(simple-kanban libspb.a pthread)
+target_link_libraries(simple-kanban libspb.a)
 target_link_libraries(simple-kanban-client pthread)
 target_link_libraries(cfgwriter libspb.a)
 
