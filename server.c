@@ -343,7 +343,7 @@ static int handle_accept(threadtimer_t* p) {
         if(!(r = check_buffer((p)))) break;
     }
     printf("Recv finished, continune: %s\n", r?"true":"false");
-    return r;
+    return r && (p)->numbytes > 0;
 }
 
 static void handle_int(int signo) {
