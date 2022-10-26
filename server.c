@@ -585,32 +585,27 @@ static int s3_set_data(threadtimer_t *timer) {
         uint32_t file_size = *(uint32_t*)(timer->data);
     #endif
     printf("Set data size: %u\n", file_size);
-    int is_first_data = 0;
-    if(timer->numbytes == sizeof(uint32_t)) {
-        if((timer->numbytes = recv(timer->accept_fd, timer->data, TIMERDATSZ, MSG_DONTWAIT)) < 0) {
-            *(uint32_t*)ret = *(uint32_t*)"erro";
-            goto S3_RETURN;
-        }
-        is_first_data = 1;
-        printf("Get data size: %d\n", (int)timer->numbytes);
+    if((timer->numbytes = recv(timer->accept_fd, timer->data, TIMERDATSZ, 0)) < 0 && errno != EAGAIN) {
+        *(uint32_t*)ret = *(uint32_t*)"erro";
+        goto S3_RETURN;
     }
-    size_t offset = (is_first_data?0:sizeof(uint32_t));
-    if(file_size <= TIMERDATSZ - offset) {
-        while(timer->numbytes != file_size - offset) {
-            ssize_t n = recv(timer->accept_fd, timer->data + timer->numbytes + offset, TIMERDATSZ - timer->numbytes - offset, MSG_WAITALL);
+    printf("Get data size: %d\n", (int)timer->numbytes);
+    if(file_size <= TIMERDATSZ) {
+        while(timer->numbytes != file_size) {
+            ssize_t n = recv(timer->accept_fd, timer->data + timer->numbytes, TIMERDATSZ - timer->numbytes, MSG_WAITALL);
             if(n <= 0) {
                 *(uint32_t*)ret = *(uint32_t*)"erro";
                 goto S3_RETURN;
             }
             timer->numbytes += n;
         }
-        if(fwrite(timer->data + offset, file_size, 1, timer->fp) != 1) {
+        if(fwrite(timer->data, file_size, 1, timer->fp) != 1) {
             perror("fwrite");
             *(uint32_t*)ret = *(uint32_t*)"erro";
         }
         goto S3_RETURN;
     }
-    if(fwrite(timer->data + offset, timer->numbytes - offset, 1, timer->fp) != 1) {
+    if(timer->numbytes > 0 && fwrite(timer->data, timer->numbytes, 1, timer->fp) != 1) {
         perror("fwrite");
         *(uint32_t*)ret = *(uint32_t*)"erro";
         goto S3_RETURN;
