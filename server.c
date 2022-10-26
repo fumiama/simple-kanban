@@ -62,7 +62,7 @@ static int kanb_file_ro_cnt, data_file_ro_cnt;
 #define MAXWAITSEC 16
 #define TIMERDATSZ BUFSIZ
 
-static struct timeval timeout = {MAXWAITSEC/4, 0};
+static struct timeval timeout;
 
 // accept_timer 使用的结构体
 // 包含了本次 accept 的全部信息
@@ -128,6 +128,7 @@ static void accept_client() {
         FD_COPY(&tmpfds, &rdfds);
         FD_COPY(&tmpfds, &erfds);
         puts("Selecting...");
+        timeout.tv_sec = MAXWAITSEC/4;
         int r = select(THREADCNT+8, &rdfds, &wrfds, &erfds, &timeout);
         if(r < 0) {
             perror("select");
