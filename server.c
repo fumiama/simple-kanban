@@ -25,7 +25,8 @@
     #include <machine/endian.h>
 #endif
 
-static config_t* cfg;        // 存储 pwd 和 sps
+static uint8_t _cfg[sizeof(SIMPLE_PB)+sizeof(config_t)];
+#define cfg ((const const_config_t*)(_cfg+sizeof(SIMPLE_PB)))        // 存储 pwd 和 sps
 
 static int fd;               // server socket fd
 
@@ -42,8 +43,15 @@ static int fd;               // server socket fd
 static char *data_path;    // cat 命令读取的文件位置
 static char *kanban_path;  // get 命令读取的文件位置
 
-static int file_mode = LOCK_UN;
-static int file_ro_cnt;
+/* lock operations for open_file */
+#define LOCK_ALLF_UN         0x00            /* unlock file */
+#define LOCK_DATA_SH         0x01            /* shared file lock */
+#define LOCK_DATA_EX         0x02            /* exclusive file lock */
+#define LOCK_KANB_SH         0x04            /* shared file lock */
+#define LOCK_KANB_EX         0x08            /* exclusive file lock */
+
+static int file_mode = LOCK_ALLF_UN;
+static int kanb_file_ro_cnt, data_file_ro_cnt;
 
 // THREADCNT 在单线程中指监听队列/select队列长度
 #define THREADCNT 16
@@ -97,14 +105,12 @@ static int s2_set(threadtimer_t *timer);
 static int s3_set_data(threadtimer_t *timer);
 
 /***************************************
- * accept_client 接受新连接，创建线程处理
- * 创建的线程入口点为 handle_accept
- * 与其伴生的结构体为 timer，负责管理
- * 该线程使用的资源，当线程（正常/异常）退出
- * 或 client 超过 MAXWAITSEC 未响应时
- * 将由与其伴生的 accept_timer 线程读取
- * timer 的信息，调用 clean_timer 回收
- * 未被释放的资源以防止内存泄漏
+ * accept_client 接受新连接，
+ * 调用 select 处理
+ * 处理入口点为 handle_accept
+ * 当 client 超过 MAXWAITSEC 未响应时
+ * 调用 clean_timer 回收
+ * 未被释放的资源以防止内存泄漏等
 ***************************************/
 static void accept_client() {
     signal(SIGINT,  handle_int);
@@ -113,11 +119,10 @@ static void accept_client() {
     signal(SIGSEGV, handle_segv);
     signal(SIGPIPE, SIG_IGN);
     signal(SIGTERM, handle_segv);
-    FD_SET(fd, &rdfds);
-    FD_SET(fd, &erfds);
     FD_SET(fd, &tmpfds);
-    puts("Ready for select, waitting...");
     while(1) {
+        FD_COPY(&tmpfds, &rdfds);
+        FD_COPY(&tmpfds, &erfds);
         int r = select(THREADCNT+8, &rdfds, &wrfds, &erfds, &timeout);
         if(r < 0) {
             perror("select");
@@ -133,7 +138,7 @@ static void accept_client() {
                     }
                 }
             }
-            goto HANDLE_FINISH;
+            continue;
         }
         puts("\nSelected");
         // 正常
@@ -170,7 +175,6 @@ static void accept_client() {
             timer->is_open = 0;
             timer->fp = NULL;
             timer->status = -1;
-            FD_SET(timer->accept_fd, &tmpfds);
             FD_SET(timer->accept_fd, &rdfds);
             puts("Add new client into select list");
         } else if(FD_ISSET(fd, &erfds)) { // 主套接字错误
@@ -191,11 +195,6 @@ static void accept_client() {
                 }
             }
         }
-        HANDLE_FINISH:
-        FD_COPY(&tmpfds, &rdfds);
-        FD_COPY(&tmpfds, &erfds);
-        FD_ZERO(&tmpfds);
-        FD_SET(fd, &tmpfds);
     }
 }
 
@@ -259,17 +258,16 @@ static void clean_timer(threadtimer_t* timer) {
         close_file(timer);
         printf("Close file, ");
     }
+    FD_CLR(timer->accept_fd, &tmpfds);
     if(timer->accept_fd) {
         close(timer->accept_fd);
         timer->accept_fd = 0;
         printf("Close accept, ");
     }
-    FD_CLR(timer->accept_fd, &rdfds);
-    FD_CLR(timer->accept_fd, &erfds);
-    FD_CLR(timer->accept_fd, &tmpfds);
     timer->touch = 0;
     timer->status = -1;
-    puts("Finish cleaning.");
+    timer->lock_type = 0;
+    puts("Finish cleaning");
 }
 
 static void close_file(threadtimer_t *timer) {
@@ -280,8 +278,11 @@ static void close_file(threadtimer_t *timer) {
         timer->is_open = 0;
         timer->fp = NULL;
         file_mode &= ~lock_type;
-        if((lock_type&LOCK_SH) > 0 && --file_ro_cnt > 0) {
-            file_mode |= LOCK_SH;
+        if((lock_type&LOCK_KANB_SH) > 0 && --kanb_file_ro_cnt > 0) {
+            file_mode |= LOCK_KANB_SH;
+        }
+        if((lock_type&LOCK_DATA_SH) > 0 && --data_file_ro_cnt > 0) {
+            file_mode |= LOCK_DATA_SH;
         }
         timer->lock_type = 0;
     }
@@ -292,19 +293,22 @@ static int close_file_and_send(threadtimer_t *timer, char *data, size_t numbytes
     return send_data(timer->accept_fd, data, numbytes);
 }
 
-#define chkbuf(p) if(!(r = check_buffer((p)))) break
 #define take_word(p, w, buff) if((p)->numbytes > strlen(w) && strstr(buff, w) == buff) {\
+                        printf("<--- Taking: %s --->\n", w);\
                         int l = strlen(w);\
                         char store = buff[l];\
                         buff[l] = 0;\
                         ssize_t n = (p)->numbytes - l;\
                         (p)->numbytes = l;\
-                        chkbuf(p);\
+                        if(!(r = check_buffer((p)))) {\
+                            puts("<--- break --->"); \
+                            break; \
+                        } \
                         buff[0] = store;\
                         memmove(buff + 1, buff + l + 1, n - 1);\
                         buff[n] = 0;\
                         (p)->numbytes = n;\
-                        printf("Split cmd: %s\n", w);\
+                        puts("<--- pass --->");\
                     }
 #define touch_timer(x) ((x)->touch = time(NULL))
 #define my_fd(x) ((x)->accept_fd)
@@ -312,8 +316,8 @@ static int close_file_and_send(threadtimer_t *timer, char *data, size_t numbytes
 // handle_accept 初步解析指令，处理部分粘连
 static int handle_accept(threadtimer_t* p) {
     int r = 1;
-    puts("Recv data from the client.");
-    send_data(my_fd(p), "Welcome to simple kanban server.", 33);
+    printf("Recv data from client@%d\n", p->index);
+    if(send_data(my_fd(p), "Welcome to simple kanban server.", 33) <= 0) return 0;
     while(((p)->numbytes = recv(my_fd(p), my_dat(p), TIMERDATSZ, MSG_DONTWAIT)) > 0) {
         touch_timer(p);
         my_dat(p)[(p)->numbytes] = 0;
@@ -327,9 +331,9 @@ static int handle_accept(threadtimer_t* p) {
         take_word(p, cfg->sps, my_dat(p));
         take_word(p, "ver",    my_dat(p));
         take_word(p, "dat",    my_dat(p));
-        if((p)->numbytes > 0)  chkbuf(p);
+        if((p)->numbytes > 0 && !(r = check_buffer((p)))) break;
     }
-    puts("Recv finished");
+    printf("Recv finished, continune: %s\n", r?"true":"false");
     return r;
 }
 
@@ -357,24 +361,37 @@ static void handle_segv(int signo) {
 static int listen_socket() {
     int flags = fcntl(fd, F_GETFL, 0);
     if(!~listen(fd, THREADCNT)) return 1;
-    return fcntl(fd, F_SETFL, flags | O_NONBLOCK); 
+    return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
 static FILE *open_file(char* file_path, int lock_type, char* mode) {
     FILE *fp = NULL;
-    if((lock_type&LOCK_SH)) {
-        if((file_mode&LOCK_EX) > 0) {
-            puts("open_file(SH): file is busy");
+    if((lock_type&LOCK_KANB_SH)) {
+        if((file_mode&LOCK_KANB_EX) > 0) {
+            puts("open_file(KANB_SH): file is busy");
             return NULL;
         }
-        file_mode |= LOCK_SH;
-        file_ro_cnt++;
-    } else if(lock_type&LOCK_EX) {
-        if((file_mode&(LOCK_EX|LOCK_SH)) > 0) {
-            puts("open_file(EX): file is busy");
+        file_mode |= LOCK_KANB_SH;
+        kanb_file_ro_cnt++;
+    } else if((lock_type&LOCK_DATA_SH)) {
+        if((file_mode&LOCK_DATA_EX) > 0) {
+            puts("open_file(DATA_SH): file is busy");
             return NULL;
         }
-        file_mode |= LOCK_EX;
+        file_mode |= LOCK_DATA_SH;
+        data_file_ro_cnt++;
+    } else if(lock_type&LOCK_KANB_EX) {
+        if((file_mode&(LOCK_KANB_EX|LOCK_KANB_SH)) > 0) {
+            puts("open_file(KANB_EX): file is busy");
+            return NULL;
+        }
+        file_mode |= LOCK_KANB_EX;
+    } else if(lock_type&LOCK_DATA_EX) {
+        if((file_mode&(LOCK_DATA_EX|LOCK_DATA_SH)) > 0) {
+            puts("open_file(DATA_EX): file is busy");
+            return NULL;
+        }
+        file_mode |= LOCK_DATA_EX;
     }
     fp = fopen(file_path, mode);
     if(!fp) {
@@ -388,14 +405,15 @@ static FILE *open_file(char* file_path, int lock_type, char* mode) {
 
 static int send_all(char* file_path, threadtimer_t *timer) {
     int re = 1;
-    FILE *fp = open_file(file_path, LOCK_SH, "rb");
+    FILE *fp = open_file(file_path, timer->lock_type, "rb");
     if(fp) {
         timer->fp = fp;
         timer->is_open = 1;
-        timer->lock_type = LOCK_SH;
         uint32_t file_size = (uint32_t)size_of_file(file_path);
-        printf("Get file size: %d bytes.\n", (int)file_size);
+        printf("Get file size: %d bytes, ", (int)file_size);
         off_t len = 0;
+        int flags = fcntl(timer->accept_fd, F_GETFL, 0);
+        fcntl(timer->accept_fd, F_SETFL, flags & ~O_NONBLOCK);
         #if __APPLE__
             #ifdef WORDS_BIGENDIAN
                 file_size = __DARWIN_OSSwapInt32(file_size);
@@ -409,10 +427,7 @@ static int send_all(char* file_path, threadtimer_t *timer) {
             hdtr.trailers = NULL;
             hdtr.trl_cnt = 0;
             re = !sendfile(fileno(fp), timer->accept_fd, 0, &len, &hdtr, 0);
-            if(!re) {
-                while(errno == EAGAIN) re = !sendfile(fileno(fp), timer->accept_fd, 0, &len, &hdtr, 0);
-                perror("sendfile");
-            }
+            if(!re) perror("sendfile");
         #else
             #ifdef WORDS_BIGENDIAN
                 uint32_t little_fs = __builtin_bswap32(file_size);
@@ -421,13 +436,11 @@ static int send_all(char* file_path, threadtimer_t *timer) {
                 send(timer->accept_fd, &file_size, sizeof(uint32_t), 0);
             #endif
             re = sendfile(timer->accept_fd, fileno(fp), &len, file_size) > 0;
-            if(!re) {
-                while(errno == EAGAIN) re = sendfile(timer->accept_fd, fileno(fp), &len, file_size) > 0;
-                perror("sendfile");
-            }
+            if(!re) perror("sendfile");
         #endif
-        printf("Send %d bytes.\n", (int)len);
+        printf("Send %d bytes\n", (int)len);
         close_file(timer);
+        fcntl(timer->accept_fd, F_SETFL, flags);
     }
     return re;
 }
@@ -455,25 +468,31 @@ static off_t size_of_file(const char* fname) {
 }
 
 static int sm1_pwd(threadtimer_t *timer) {
-    if(!strcmp(cfg->pwd, timer->data)) timer->status = 0;
+    if(!strcmp(cfg->pwd, timer->data)) {
+        timer->status = 0;
+        puts("Password check passed");
+    } else puts("Password check failed");
     return !timer->status;
 }
 
 static int s0_init(threadtimer_t *timer) {
     if(!strcmp("get", timer->data)) timer->status = 1;
     else if(!strcmp(cfg->sps, timer->data)) timer->status = 2;
-    else if(!strcmp("cat", timer->data)) return send_all(data_path, timer);
+    else if(!strcmp("cat", timer->data)) {
+        timer->lock_type = LOCK_DATA_SH;
+        return send_all(data_path, timer);
+    }
     else if(!strcmp("quit", timer->data)) return 0;
     return send_data(timer->accept_fd, timer->data, timer->numbytes);
 }
 
 static int s1_get(threadtimer_t *timer) {        //get kanban
-    FILE *fp = open_file(kanban_path, LOCK_SH, "rb");
+    FILE *fp = open_file(kanban_path, LOCK_KANB_SH, "rb");
     timer->status = 0;
     if(fp) {
         timer->fp = fp;
         timer->is_open = 1;
-        timer->lock_type = LOCK_SH;
+        timer->lock_type = LOCK_KANB_SH;
         uint32_t ver, cli_ver;
         if(fscanf(fp, "%u", &ver) > 0) {
             if(sscanf(timer->data, "%u", &cli_ver) > 0) {
@@ -482,7 +501,7 @@ static int s1_get(threadtimer_t *timer) {        //get kanban
                     close_file(timer);
                     int r = send_all(kanban_path, timer);
                     if(strstr(timer->data, "quit") == timer->data + timer->numbytes - 4) {
-                        puts("Found last cmd is quit.");
+                        puts("Found last cmd is quit");
                         return 0;
                     }
                     return r;
@@ -492,7 +511,7 @@ static int s1_get(threadtimer_t *timer) {        //get kanban
     }
     int r = close_file_and_send(timer, "null", 4);
     if(strstr(timer->data, "quit") == timer->data + timer->numbytes - 4) {
-        puts("Found last cmd is quit.");
+        puts("Found last cmd is quit");
         return 0;
     }
     return r;
@@ -500,16 +519,19 @@ static int s1_get(threadtimer_t *timer) {        //get kanban
 
 static int s2_set(threadtimer_t *timer) {
     FILE *fp = NULL;
+    int lktp;
     if(!strcmp(timer->data, "ver")) {
-        fp = open_file(kanban_path, LOCK_EX, "wb");
+        fp = open_file(kanban_path, LOCK_KANB_EX, "wb");
+        lktp = LOCK_KANB_EX;
     } else if(!strcmp(timer->data, "dat")) {
-        fp = open_file(data_path, LOCK_EX, "wb");
+        fp = open_file(data_path, LOCK_DATA_EX, "wb");
+        lktp = LOCK_DATA_EX;
     }
     if(fp) {
         timer->status = 3;
         timer->fp = fp;
         timer->is_open = 1;
-        timer->lock_type = LOCK_EX;
+        timer->lock_type = lktp;
         return send_data(timer->accept_fd, "data", 4);
     } else {
         timer->status = 0;
@@ -528,7 +550,7 @@ static int s3_set_data(threadtimer_t *timer) {
     printf("Set data size: %u\n", file_size);
     int is_first_data = 0;
     if(timer->numbytes == sizeof(uint32_t)) {
-        if((timer->numbytes = recv(timer->accept_fd, timer->data, TIMERDATSZ, 0)) <= 0) {
+        if((timer->numbytes = recv(timer->accept_fd, timer->data, TIMERDATSZ, MSG_DONTWAIT)) <= 0) {
             *(uint32_t*)ret = *(uint32_t*)"erro";
             goto S3_RETURN;
         }
@@ -618,8 +640,7 @@ int main(int argc, char *argv[]) {
         perror(argv[as_daemon?5:4]);
         return 5;
     }
-    SIMPLE_PB* spb = get_pb(fp);
-    cfg = (config_t*)spb->target;
+    read_pb_into(fp, (SIMPLE_PB*)(&_cfg));
     fclose(fp);
     if(!(fd = bind_server(&port))) {
         return 6;

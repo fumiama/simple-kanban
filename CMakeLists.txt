@@ -17,9 +17,11 @@ add_executable(simple-kanban server.c)
 add_executable(simple-kanban-client client.c)
 add_executable(cfgwriter cfgwriter.c)
 
-target_link_libraries(simple-kanban libspb.a)
+find_library(SPB_STATIC_LIB libspb.a)
+
+target_link_libraries(simple-kanban ${SPB_STATIC_LIB})
 target_link_libraries(simple-kanban-client pthread)
-target_link_libraries(cfgwriter libspb.a)
+target_link_libraries(cfgwriter ${SPB_STATIC_LIB})
 
 INSTALL(TARGETS simple-kanban RUNTIME DESTINATION bin)
 INSTALL(TARGETS simple-kanban-client RUNTIME DESTINATION bin)
