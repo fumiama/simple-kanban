@@ -9,6 +9,7 @@
 您需要首先安装[simple-protobuf](https://github.com/fumiama/simple-protobuf)，并记住安装路径。如果安装路径不是`/usr/local`，需要手动更改`CMakeLists.txt`的路径指向正确位置。
 ```bash
 git clone https://github.com/fumiama/simple-protobuf.git
+cd simple-protobuf
 mkdir build
 cd build
 cmake ..
