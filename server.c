@@ -93,6 +93,7 @@ static void clean_timer(threadtimer_t* timer);
 static void close_file(threadtimer_t *timer);
 static int close_file_and_send(threadtimer_t *timer, char *data, size_t numbytes);
 static int handle_accept(threadtimer_t* p);
+static void handle_end(int signo);
 static void handle_int(int signo);
 static void handle_quit(int signo);
 static void handle_segv(int signo);
@@ -119,10 +120,10 @@ static void accept_client() {
     int i;
     signal(SIGINT,  handle_int);
     signal(SIGQUIT, handle_quit);
-    signal(SIGKILL, handle_segv);
+    signal(SIGKILL, handle_end);
     signal(SIGSEGV, handle_segv);
     signal(SIGPIPE, SIG_IGN);
-    signal(SIGTERM, handle_segv);
+    signal(SIGTERM, handle_end);
     FD_SET(fd, &tmpfds);
     while(1) {
         FD_COPY(&tmpfds, &rdfds);
@@ -336,7 +337,8 @@ static int handle_accept(threadtimer_t* p) {
         take_word(p, cfg->sps, my_dat(p));
         take_word(p, "ver",    my_dat(p));
         take_word(p, "dat",    my_dat(p));
-        if((p)->numbytes > 0 && !(r = check_buffer((p)))) break;
+        if((p)->numbytes <= 0) break;
+        if(!(r = check_buffer((p)))) break;
     }
     printf("Recv finished, continune: %s\n", r?"true":"false");
     return r;
@@ -357,7 +359,14 @@ static void handle_quit(int signo) {
 }
 
 static void handle_segv(int signo) {
-    puts("Handle kill/segv/term");
+    puts("Handle sigsegv");
+    close(fd);
+    fflush(stdout);
+    exit(0);
+}
+
+static void handle_end(int signo) {
+    puts("Handle kill/term");
     close(fd);
     fflush(stdout);
     exit(0);
