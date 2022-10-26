@@ -182,7 +182,12 @@ static void accept_client() {
             timer->is_open = 0;
             timer->fp = NULL;
             timer->status = -1;
-            FD_SET(timer->accept_fd, &rdfds);
+            if(send_data(timer->accept_fd, "Welcome to simple kanban server.", 33) <= 0) {
+                puts("Send banner to new client failed");
+                clean_timer(timer);
+                goto HANDLE_CLIENTS;
+            }
+            FD_SET(timer->accept_fd, &tmpfds);
             puts("Add new client into select list");
         } else if(FD_ISSET(fd, &erfds)) { // 主套接字错误
             int nfd = accept(fd, (struct sockaddr *)&client_addr, &struct_len);
@@ -325,8 +330,7 @@ static int close_file_and_send(threadtimer_t *timer, char *data, size_t numbytes
 // handle_accept 初步解析指令，处理部分粘连
 static int handle_accept(threadtimer_t* p) {
     int r = 1;
-    printf("Recv data from client@%d\n", p->index);
-    if(!~((p)->status) && send_data(my_fd(p), "Welcome to simple kanban server.", 33) <= 0) return 0;
+    printf("Recv data from client@%d, ", p->index);
     if((p)->status == 3) return s3_set_data(p);
     while(((p)->numbytes = recv(my_fd(p), my_dat(p), TIMERDATSZ, MSG_DONTWAIT)) > 0) {
         touch_timer(p);
@@ -343,7 +347,7 @@ static int handle_accept(threadtimer_t* p) {
         if((p)->numbytes <= 0) break;
         if(!(r = check_buffer((p)))) break;
     }
-    if((p)->numbytes <= 0) {
+    if((p)->numbytes < 0) {
         perror("recv");
         r = r && errno == EWOULDBLOCK;
     }
