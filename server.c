@@ -343,7 +343,10 @@ static int handle_accept(threadtimer_t* p) {
         if((p)->numbytes <= 0) break;
         if(!(r = check_buffer((p)))) break;
     }
-    r &= (p)->numbytes >= 0 || errno == EWOULDBLOCK;
+    if((p)->numbytes <= 0) {
+        perror("recv");
+        r = r && errno == EWOULDBLOCK;
+    }
     printf("Recv finished, continune: %s\n", r?"true":"false");
     return r;
 }
