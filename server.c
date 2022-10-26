@@ -356,7 +356,7 @@ static int handle_accept(threadtimer_t* p) {
                 r = 0;
                 puts("Max EAGAIN cnt exceeded");
             }
-        } else r = 0;
+        } else if(errno != EINVAL) r = 0;
     }
     printf("Recv finished, continune: %s\n", r?"true":"false");
     return r;
