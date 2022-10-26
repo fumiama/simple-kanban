@@ -21,6 +21,9 @@
 #if !__APPLE__
     #include <sys/sendfile.h>
     #include <endian.h>
+    #ifndef FD_COPY
+        #define FD_COPY(f, t)  bcopy(f, t, sizeof(*(f)))
+    #endif
 #else
     #include <machine/endian.h>
 #endif
