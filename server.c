@@ -327,11 +327,12 @@ static int handle_accept(threadtimer_t* p) {
     int r = 1;
     printf("Recv data from client@%d\n", p->index);
     if(!~((p)->status) && send_data(my_fd(p), "Welcome to simple kanban server.", 33) <= 0) return 0;
+    if((p)->status == 3) return s3_set_data(p);
     while(((p)->numbytes = recv(my_fd(p), my_dat(p), TIMERDATSZ, MSG_DONTWAIT)) > 0) {
         touch_timer(p);
         my_dat(p)[(p)->numbytes] = 0;
         printf("Get %d bytes: %s, Check buffer...\n", (int)(p)->numbytes, my_dat(p));
-        //处理部分粘连
+        //处理允许的粘连
         take_word(p, cfg->pwd, my_dat(p));
         take_word(p, "get",    my_dat(p));
         take_word(p, "cat",    my_dat(p));
@@ -558,6 +559,11 @@ static int s2_set(threadtimer_t *timer) {
 static int s3_set_data(threadtimer_t *timer) {
     char ret[4] = "succ";
     timer->status = 0;
+    ssize_t n = recv(timer->accept_fd, timer->data, 4, MSG_WAITALL);
+    if(n < 4) {
+        *(uint32_t*)ret = *(uint32_t*)"erro";
+        goto S3_RETURN;
+    }
     #ifdef WORDS_BIGENDIAN
         uint32_t file_size = __builtin_bswap32(*(uint32_t*)(timer->data));
     #else
