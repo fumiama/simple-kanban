@@ -73,8 +73,8 @@ struct threadtimer_t {
     int accept_fd;      // 本次 accept 的 fd
     int lock_type;      // 打开文件类型
     ssize_t numbytes;   // 本次接收的数据长度
-    char status;        // 本会话所处的状态
-    char is_open;       // 标识 fp 是否正在使用
+    int16_t status;     // 本会话所处的状态
+    int16_t is_open;    // 标识 fp 是否正在使用
     FILE *fp;           // 本会话打开的文件
     char data[TIMERDATSZ];
 };
