@@ -311,8 +311,10 @@ static int close_file_and_send(threadtimer_t *timer, char *data, size_t numbytes
                             puts("<--- break --->"); \
                             break; \
                         } \
-                        buff[0] = store;\
-                        memmove(buff + 1, buff + l + 1, n - 1);\
+                        if(n > 0) { \
+                            buff[0] = store; \
+                            memmove(buff + 1, buff + l + 1, n - 1); \
+                        } \
                         buff[n] = 0;\
                         (p)->numbytes = n;\
                         puts("<--- pass --->");\
