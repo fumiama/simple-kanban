@@ -113,6 +113,7 @@ static int s3_set_data(threadtimer_t *timer);
  * 未被释放的资源以防止内存泄漏等
 ***************************************/
 static void accept_client() {
+    int i;
     signal(SIGINT,  handle_int);
     signal(SIGQUIT, handle_quit);
     signal(SIGKILL, handle_segv);
@@ -129,7 +130,7 @@ static void accept_client() {
             return;
         }
         if(r == 0) { // 超时
-            for(int i = 0; i < THREADCNT; i++) {
+            for(i = 0; i < THREADCNT; i++) {
                 if(timers[i].touch && timers[i].accept_fd) {
                     time_t waitsec = time(NULL) - timers[i].touch;
                     if(waitsec > MAXWAITSEC) {
@@ -184,7 +185,7 @@ static void accept_client() {
             return;
         }
         HANDLE_CLIENTS:
-        for(int i = 0; i < THREADCNT; i++) {
+        for(i = 0; i < THREADCNT; i++) {
             if(timers[i].touch && timers[i].accept_fd) {
                 if(FD_ISSET(timers[i].accept_fd, &rdfds)) {
                     if(!handle_accept(&timers[i])) clean_timer(&timers[i]);
