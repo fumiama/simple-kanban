@@ -323,7 +323,7 @@ static int close_file_and_send(threadtimer_t *timer, char *data, size_t numbytes
 static int handle_accept(threadtimer_t* p) {
     int r = 1;
     printf("Recv data from client@%d\n", p->index);
-    if(send_data(my_fd(p), "Welcome to simple kanban server.", 33) <= 0) return 0;
+    if(!~((p)->status) && send_data(my_fd(p), "Welcome to simple kanban server.", 33) <= 0) return 0;
     while(((p)->numbytes = recv(my_fd(p), my_dat(p), TIMERDATSZ, MSG_DONTWAIT)) > 0) {
         touch_timer(p);
         my_dat(p)[(p)->numbytes] = 0;
