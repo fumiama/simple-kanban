@@ -127,6 +127,7 @@ static void accept_client() {
     while(1) {
         FD_COPY(&tmpfds, &rdfds);
         FD_COPY(&tmpfds, &erfds);
+        puts("Selecting...");
         int r = select(THREADCNT+8, &rdfds, &wrfds, &erfds, &timeout);
         if(r < 0) {
             perror("select");
