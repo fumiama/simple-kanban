@@ -71,10 +71,11 @@ struct threadtimer_t {
     int index;          // 自身位置
     time_t touch;       // 最后访问时间，与当前时间差超过 MAXWAITSEC 将强行中断连接
     int accept_fd;      // 本次 accept 的 fd
-    int lock_type;      // 打开文件类型
     ssize_t numbytes;   // 本次接收的数据长度
-    int16_t status;     // 本会话所处的状态
-    int16_t is_open;    // 标识 fp 是否正在使用
+    int8_t status;      // 本会话所处的状态
+    uint8_t is_open;    // 标识 fp 是否正在使用
+    uint8_t lock_type;  // 打开文件类型
+    uint8_t again_cnt;  // EAGAIN 次数
     FILE *fp;           // 本会话打开的文件
     char data[TIMERDATSZ];
 };
@@ -182,6 +183,7 @@ static void accept_client() {
             timer->is_open = 0;
             timer->fp = NULL;
             timer->status = -1;
+            timer->again_cnt = 0;
             if(send_data(timer->accept_fd, "Welcome to simple kanban server.", 33) <= 0) {
                 puts("Send banner to new client failed");
                 clean_timer(timer);
@@ -347,9 +349,14 @@ static int handle_accept(threadtimer_t* p) {
         if((p)->numbytes <= 0) break;
         if(!(r = check_buffer((p)))) break;
     }
-    if((p)->numbytes < 0) {
+    if((p)->numbytes <= 0) {
         perror("recv");
-        r = r && errno == EWOULDBLOCK;
+        if(errno == EAGAIN) {
+            if(!++(p)->again_cnt) {
+                r = 0;
+                puts("Max EAGAIN cnt exceeded");
+            }
+        } else r = 0;
     }
     printf("Recv finished, continune: %s\n", r?"true":"false");
     return r;
