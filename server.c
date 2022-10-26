@@ -299,7 +299,7 @@ static int close_file_and_send(threadtimer_t *timer, char *data, size_t numbytes
     return send_data(timer->accept_fd, data, numbytes);
 }
 
-#define take_word(p, w, buff) if((p)->numbytes > strlen(w) && strstr(buff, w) == buff) {\
+#define take_word(p, w, buff) if((p)->numbytes >= strlen(w) && strstr(buff, w) == buff) {\
                         printf("<--- Taking: %s --->\n", w);\
                         int l = strlen(w);\
                         char store = buff[l];\
@@ -331,7 +331,6 @@ static int handle_accept(threadtimer_t* p) {
         //处理部分粘连
         take_word(p, cfg->pwd, my_dat(p));
         take_word(p, "get",    my_dat(p));
-        take_word(p, "set",    my_dat(p));
         take_word(p, "cat",    my_dat(p));
         take_word(p, "quit",   my_dat(p));
         take_word(p, cfg->sps, my_dat(p));
