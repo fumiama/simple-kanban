@@ -405,7 +405,7 @@ static FILE *open_file(char* file_path, int lock_type, char* mode) {
         file_mode &= ~lock_type;
         return NULL;
     }
-    printf("Open file in mode %s\n", mode);
+    printf("Open file %s in mode %s\n", file_path, mode);
     return fp;
 }
 
@@ -556,7 +556,7 @@ static int s3_set_data(threadtimer_t *timer) {
     printf("Set data size: %u\n", file_size);
     int is_first_data = 0;
     if(timer->numbytes == sizeof(uint32_t)) {
-        if((timer->numbytes = recv(timer->accept_fd, timer->data, TIMERDATSZ, MSG_DONTWAIT)) <= 0) {
+        if((timer->numbytes = recv(timer->accept_fd, timer->data, TIMERDATSZ, MSG_DONTWAIT)) < 0) {
             *(uint32_t*)ret = *(uint32_t*)"erro";
             goto S3_RETURN;
         }

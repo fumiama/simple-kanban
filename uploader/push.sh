@@ -11,12 +11,10 @@ $kanban
 EOF
 echo md5:${md5val##* } | tr -d '\n' >> $3
 cat > cmd_seq.txt << EOF
-$5set$6
-dat
+$5$6dat
 file
 $4
-set$6
-ver
+$6ver
 file
 $3
 quit
