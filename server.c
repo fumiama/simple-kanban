@@ -573,6 +573,8 @@ static int s2_set(threadtimer_t *timer) {
 
 static int s3_set_data(threadtimer_t *timer) {
     char ret[4] = "succ";
+    int flags = fcntl(timer->accept_fd, F_GETFL, 0);
+    fcntl(timer->accept_fd, F_SETFL, flags & ~O_NONBLOCK);
     timer->status = 0;
     ssize_t n = recv(timer->accept_fd, timer->data, 4, MSG_WAITALL);
     if(n < 4) {
@@ -626,6 +628,7 @@ static int s3_set_data(threadtimer_t *timer) {
         remain -= n;
     }
 S3_RETURN:
+    fcntl(timer->accept_fd, F_SETFL, flags);
     return close_file_and_send(timer, ret, 4);
 }
 
@@ -681,6 +684,10 @@ int main(int argc, char *argv[]) {
         perror("Listen failed");
         return 7;
     }
+    printf("password: ");
+    puts(cfg->pwd);
+    printf("set password: ");
+    puts(cfg->sps);
     accept_client();
     close(fd);
     return 99;
