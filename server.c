@@ -616,9 +616,13 @@ static int s3_set_data(threadtimer_t *timer) {
     while(remain > 0) {
         // printf("remain:%d\n", (int)remain);
         ssize_t n = recv(timer->accept_fd, timer->data, (remain>TIMERDATSZ)?TIMERDATSZ:remain, MSG_WAITALL);
-        if(n <= 0) {
+        if(n < 0) {
             *(uint32_t*)ret = *(uint32_t*)"erro";
             goto S3_RETURN;
+        }
+        else if(!n) {
+            usleep(10000); // 10 ms
+            continue;
         }
         if(fwrite(timer->data, n, 1, timer->fp) != 1) {
             perror("fwrite");
