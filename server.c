@@ -308,14 +308,14 @@ static int close_file_and_send(threadtimer_t *timer, char *data, size_t numbytes
 }
 
 #define take_word(p, w, buff) if((p)->numbytes >= strlen(w) && strstr(buff, w) == buff) {\
-                        printf("<--- Taking: %s --->\n", w);\
+                        printf("<--- Taking: %s in %d --->\n", w, (p)->numbytes);\
                         int l = strlen(w);\
                         char store = buff[l];\
                         buff[l] = 0;\
                         ssize_t n = (p)->numbytes - l;\
                         (p)->numbytes = l;\
                         if(!(r = check_buffer((p)))) {\
-                            puts("<--- break --->"); \
+                            printf("<--- break in %d --->\n", (p)->numbytes); \
                             break; \
                         } \
                         if(n > 0) { \
@@ -324,7 +324,7 @@ static int close_file_and_send(threadtimer_t *timer, char *data, size_t numbytes
                         } \
                         buff[n] = 0;\
                         (p)->numbytes = n;\
-                        puts("<--- pass --->");\
+                        printf("<--- pass in %d --->\n", (p)->numbytes); \
                     }
 #define touch_timer(x) ((x)->touch = time(NULL))
 #define my_fd(x) ((x)->accept_fd)
@@ -489,6 +489,7 @@ static int send_data(int accept_fd, char *data, size_t length) {
         data[126] = '.';
         data[127] =  0;
     }
+    if(data[length-1]) data[length-1] = 0;
     puts(data);
     return 1;
 }
