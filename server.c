@@ -363,7 +363,7 @@ static int handle_accept(threadtimer_t* p) {
             }
         } else r = 0;
     }
-    printf("Recv finished, continue: %s\n", r?"true":"false");
+    printf("Recv finished, remain: %zd, continue: %s\n", (p)->numbytes, r?"true":"false");
     return r;
 }
 
