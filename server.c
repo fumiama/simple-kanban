@@ -28,6 +28,7 @@
     #include <machine/endian.h>
 #endif
 
+
 static uint8_t _cfg[sizeof(SIMPLE_PB)+sizeof(config_t)];
 #define cfg ((const const_config_t*)(_cfg+sizeof(SIMPLE_PB)))        // 存储 pwd 和 sps
 
@@ -47,36 +48,35 @@ static char *data_path;    // cat 命令读取的文件位置
 static char *kanban_path;  // get 命令读取的文件位置
 
 /* lock operations for open_file */
-#define LOCK_ALLF_UN         0x00            /* unlock file */
-#define LOCK_DATA_SH         0x01            /* shared file lock */
-#define LOCK_DATA_EX         0x02            /* exclusive file lock */
-#define LOCK_KANB_SH         0x04            /* shared file lock */
-#define LOCK_KANB_EX         0x08            /* exclusive file lock */
+#define LOCK_ALLF_UN         0x00            /* unlock all file */
+#define LOCK_DATA_SH         0x01            /* shared data file lock */
+#define LOCK_DATA_EX         0x02            /* exclusive data file lock */
+#define LOCK_KANB_SH         0x04            /* shared kanban file lock */
+#define LOCK_KANB_EX         0x08            /* exclusive kanban file lock */
 
 static int file_mode = LOCK_ALLF_UN;
 static int kanb_file_ro_cnt, data_file_ro_cnt;
 
-// THREADCNT 在单线程中指监听队列/select队列长度
+// THREADCNT 并行的监听队列/select队列长度
 #define THREADCNT 16
-
+// MAXWAITSEC 最大等待时间
 #define MAXWAITSEC 16
-#define TIMERDATSZ BUFSIZ
+#define TIMERDATSZ (BUFSIZ-sizeof(int)-sizeof(time_t)-sizeof(int)-sizeof(ssize_t)-sizeof(int8_t)-sizeof(uint8_t)*3-sizeof(FILE*))
 
 static struct timeval timeout;
 
-// accept_timer 使用的结构体
+// 会话的上下文
 // 包含了本次 accept 的全部信息
-// 以方便退出后清理空间
 struct threadtimer_t {
     int index;          // 自身位置
-    time_t touch;       // 最后访问时间，与当前时间差超过 MAXWAITSEC 将强行中断连接
     int accept_fd;      // 本次 accept 的 fd
+    time_t touch;       // 最后访问时间，与当前时间差超过 MAXWAITSEC 将强行中断连接
     ssize_t numbytes;   // 本次接收的数据长度
+    FILE *fp;           // 本会话打开的文件
     int8_t status;      // 本会话所处的状态
     uint8_t is_open;    // 标识 fp 是否正在使用
     uint8_t lock_type;  // 打开文件类型
     uint8_t again_cnt;  // EAGAIN 次数
-    FILE *fp;           // 本会话打开的文件
     char data[TIMERDATSZ];
 };
 typedef struct threadtimer_t threadtimer_t;
@@ -87,12 +87,26 @@ static fd_set rdfds, wrfds, erfds, tmpfds;
 
 #define show_usage(program) printf("Usage: %s (-d) port kanban.txt data.bin config.sp\n\t-d: As daemon\n", program)
 
+
+/*
+ * accept_client 接受新连接，
+ * 调用 select 处理
+ * 处理入口点为 handle_accept
+ * 当 client 超过 MAXWAITSEC 未响应时
+ * 调用 clean_timer 回收
+ * 未被释放的资源以防止内存泄漏等
+*/
 static void accept_client();
 static int bind_server(int* port);
+/*
+ * check_buffer 检查接收到的数据，结合
+ * 当前会话所处状态决定接下来的处理流程
+*/
 static int check_buffer(threadtimer_t *timer);
 static void clean_timer(threadtimer_t* timer);
 static void close_file(threadtimer_t *timer);
 static int close_file_and_send(threadtimer_t *timer, char *data, size_t numbytes);
+// handle_accept 初步解析指令，处理部分粘连
 static int handle_accept(threadtimer_t* p);
 static void handle_end(int signo);
 static void handle_int(int signo);
@@ -109,14 +123,7 @@ static int s1_get(threadtimer_t *timer);
 static int s2_set(threadtimer_t *timer);
 static int s3_set_data(threadtimer_t *timer);
 
-/***************************************
- * accept_client 接受新连接，
- * 调用 select 处理
- * 处理入口点为 handle_accept
- * 当 client 超过 MAXWAITSEC 未响应时
- * 调用 clean_timer 回收
- * 未被释放的资源以防止内存泄漏等
-***************************************/
+
 static void accept_client() {
     int i;
     signal(SIGINT,  handle_int);
@@ -249,10 +256,6 @@ static int bind_server(int* port) {
     return fd;
 }
 
-/***************************************
- * check_buffer 检查接收到的数据，结合
- * 当前会话所处状态决定接下来的处理流程
-***************************************/
 static int check_buffer(threadtimer_t *timer) {
     printf("Status: %d\n", (int)timer->status);
     switch(timer->status) {
@@ -265,7 +268,6 @@ static int check_buffer(threadtimer_t *timer) {
     }
 }
 
-// clean_timer 清理 timer
 static void clean_timer(threadtimer_t* timer) {
     printf("Start cleaning: ");
     if(timer->is_open) {
@@ -329,7 +331,6 @@ static int close_file_and_send(threadtimer_t *timer, char *data, size_t numbytes
 #define touch_timer(x) ((x)->touch = time(NULL))
 #define my_fd(x) ((x)->accept_fd)
 #define my_dat(x) ((x)->data)
-// handle_accept 初步解析指令，处理部分粘连
 static int handle_accept(threadtimer_t* p) {
     int r = 1;
     printf("Recv data from client@%d, ", p->index);
@@ -369,6 +370,13 @@ static int handle_accept(threadtimer_t* p) {
     return r;
 }
 
+static void handle_end(int signo) {
+    puts("Handle kill/term");
+    close(fd);
+    fflush(stdout);
+    exit(0);
+}
+
 static void handle_int(int signo) {
     puts("Keyboard interrupted");
     close(fd);
@@ -385,13 +393,6 @@ static void handle_quit(int signo) {
 
 static void handle_segv(int signo) {
     puts("Handle sigsegv");
-    close(fd);
-    fflush(stdout);
-    exit(0);
-}
-
-static void handle_end(int signo) {
-    puts("Handle kill/term");
     close(fd);
     fflush(stdout);
     exit(0);
@@ -702,10 +703,12 @@ int main(int argc, char *argv[]) {
         perror("Listen failed");
         return 7;
     }
+    /*
     printf("password: ");
     puts(cfg->pwd);
     printf("set password: ");
     puts(cfg->sps);
+    */
     accept_client();
     close(fd);
     return 99;
