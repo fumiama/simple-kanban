@@ -355,13 +355,15 @@ static int handle_accept(threadtimer_t* p) {
         break;
     }
     if((p)->numbytes <= 0) {
-        perror("recv");
         if(errno == EAGAIN || errno == EINVAL) {
             if(!++(p)->again_cnt) {
                 r = 0;
                 puts("Max EAGAIN/EINVAL cnt exceeded");
             }
-        } else r = 0;
+        } else if(errno) {
+            perror("recv");
+            r = 0;
+        }
     }
     printf("Recv finished, remain: %zd, continue: %s\n", (p)->numbytes, r?"true":"false");
     return r;
