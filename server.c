@@ -478,19 +478,25 @@ static int send_all(char* file_path, threadtimer_t *timer) {
 }
 
 static int send_data(int accept_fd, char *data, size_t length) {
+    char buf[128];
+    if(length == 0) {
+        puts("Send data error: zero length");
+        return 0;
+    }
     if(!~send(accept_fd, data, length, MSG_DONTWAIT)) {
         puts("Send data error");
         return 0;
     }
     printf("Send data: ");
     if(length > 128) {
-        data[124] = '.';
-        data[125] = '.';
-        data[126] = '.';
-        data[127] =  0;
-    }
-    if(data[length-1]) data[length-1] = 0;
-    puts(data);
+        memcpy(buf, data, 124);
+        buf[124] = '.';
+        buf[125] = '.';
+        buf[126] = '.';
+        buf[127] =  0;
+    } else memcpy(buf, data, length);
+    if(buf[length-1]) buf[length-1] = 0;
+    puts(buf);
     return 1;
 }
 
