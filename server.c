@@ -346,8 +346,13 @@ static int handle_accept(threadtimer_t* p) {
         take_word(p, cfg->sps, my_dat(p));
         take_word(p, "ver",    my_dat(p));
         take_word(p, "dat",    my_dat(p));
-        if((p)->numbytes <= 0) break;
-        if(!(r = check_buffer((p)))) break;
+        if((p)->numbytes <= 0) {
+            puts("Taking words finished");
+            break;
+        }
+        puts("Last check_buffer");
+        r = check_buffer((p));
+        break;
     }
     if((p)->numbytes <= 0) {
         perror("recv");
@@ -358,7 +363,7 @@ static int handle_accept(threadtimer_t* p) {
             }
         } else r = 0;
     }
-    printf("Recv finished, continune: %s\n", r?"true":"false");
+    printf("Recv finished, continue: %s\n", r?"true":"false");
     return r;
 }
 
@@ -488,14 +493,14 @@ static int send_data(int accept_fd, char *data, size_t length) {
         return 0;
     }
     printf("Send data: ");
-    if(length > 128) {
+    if(length >= 128) {
         memcpy(buf, data, 124);
         buf[124] = '.';
         buf[125] = '.';
         buf[126] = '.';
         buf[127] =  0;
     } else memcpy(buf, data, length);
-    if(buf[length-1]) buf[length-1] = 0;
+    if(buf[length]) buf[length] = 0;
     puts(buf);
     return 1;
 }
