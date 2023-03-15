@@ -310,7 +310,7 @@ static int close_file_and_send(threadtimer_t *timer, char *data, size_t numbytes
     return send_data(timer->accept_fd, data, numbytes);
 }
 
-#define take_word(p, w, buff) if((p)->numbytes >= strlen(w) && strncmp(buff, w, strlen(w)) == buff) {\
+#define take_word(p, w, buff) if((p)->numbytes >= strlen(w) && !strncmp(buff, w, strlen(w))) {\
                         printf("<--- Taking: %s in %zd --->\n", w, (p)->numbytes);\
                         int l = strlen(w);\
                         char store = buff[l];\
