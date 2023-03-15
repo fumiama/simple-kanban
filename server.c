@@ -309,7 +309,7 @@ static int close_file_and_send(threadtimer_t *timer, char *data, size_t numbytes
     return send_data(timer->accept_fd, data, numbytes);
 }
 
-#define take_word(p, w, buff) if((p)->numbytes >= strlen(w) && strstr(buff, w) == buff) {\
+#define take_word(p, w, buff) if((p)->numbytes >= strlen(w) && strncmp(buff, w, strlen(w)) == buff) {\
                         printf("<--- Taking: %s in %zd --->\n", w, (p)->numbytes);\
                         int l = strlen(w);\
                         char store = buff[l];\
@@ -515,7 +515,7 @@ static off_t size_of_file(const char* fname) {
 }
 
 static int sm1_pwd(threadtimer_t *timer) {
-    if(!strcmp(cfg->pwd, timer->data)) {
+    if(!strncmp(timer->data, cfg->pwd, strlen(cfg->pwd))) {
         timer->status = 0;
         puts("Password check passed");
     } else puts("Password check failed");
@@ -523,13 +523,13 @@ static int sm1_pwd(threadtimer_t *timer) {
 }
 
 static int s0_init(threadtimer_t *timer) {
-    if(!strcmp("get", timer->data)) timer->status = 1;
-    else if(!strcmp(cfg->sps, timer->data)) timer->status = 2;
-    else if(!strcmp("cat", timer->data)) {
+    if(!strncmp(timer->data, "get", 3)) timer->status = 1;
+    else if(!strncmp(timer->data, cfg->sps, strlen(cfg->sps))) timer->status = 2;
+    else if(!strncmp(timer->data, "cat", 3)) {
         timer->lock_type = LOCK_DATA_SH;
         return send_all(data_path, timer);
     }
-    else if(!strcmp("quit", timer->data)) return 0;
+    else if(!strncmp(timer->data, "quit", 4)) return 0;
     return send_data(timer->accept_fd, timer->data, timer->numbytes);
 }
 
@@ -547,7 +547,7 @@ static int s1_get(threadtimer_t *timer) {        //get kanban
                     timer->is_open = 0;
                     close_file(timer);
                     int r = send_all(kanban_path, timer);
-                    if(strstr(timer->data, "quit") == timer->data + timer->numbytes - 4) {
+                    if(!strncmp(timer->data, "quit", 4)) {
                         puts("Found last cmd is quit");
                         return 0;
                     }
@@ -557,7 +557,7 @@ static int s1_get(threadtimer_t *timer) {        //get kanban
         }
     }
     int r = close_file_and_send(timer, "null", 4);
-    if(strstr(timer->data, "quit") == timer->data + timer->numbytes - 4) {
+    if(!strncmp(timer->data, "quit", 4)) {
         puts("Found last cmd is quit");
         return 0;
     }
@@ -567,10 +567,10 @@ static int s1_get(threadtimer_t *timer) {        //get kanban
 static int s2_set(threadtimer_t *timer) {
     FILE *fp = NULL;
     int lktp;
-    if(!strcmp(timer->data, "ver")) {
+    if(!strncmp(timer->data, "ver", 3)) {
         fp = open_file(kanban_path, LOCK_KANB_EX, "wb");
         lktp = LOCK_KANB_EX;
-    } else if(!strcmp(timer->data, "dat")) {
+    } else if(!strncmp(timer->data, "dat", 3)) {
         fp = open_file(data_path, LOCK_DATA_EX, "wb");
         lktp = LOCK_DATA_EX;
     }
@@ -657,7 +657,7 @@ int main(int argc, char *argv[]) {
         return 0;
     }
     int port = 0;
-    int as_daemon = !strcmp("-d", argv[1]);
+    int as_daemon = !strncmp(argv[1], "-d", 3);
     sscanf(argv[as_daemon?2:1], "%d", &port);
     if(port < 0 || port >= 65536) {
         printf("Error port: %d\n", port);
