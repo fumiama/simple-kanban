@@ -569,7 +569,15 @@ static int s1_get(threadtimer_t *timer) {        //get kanban
     int r = close_file_and_send(timer, "null", 4);
     if(strstr(timer->data, "quit")) {
         puts("Found last cmd is quit");
+        timer->numbytes = 0;
         return 0;
+    }
+    int i = 0;
+    for(; i < timer->numbytes; i++) {
+        if(!isdigit(timer->data[i])) {
+            timer->numbytes -= i;
+            break;
+        }
     }
     return r;
 }
