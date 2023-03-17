@@ -554,7 +554,8 @@ static int s1_get(threadtimer_t *timer) {        //get kanban
                         timer->numbytes = 0;
                         return 0;
                     }
-                    for(int i = 0; i < timer->numbytes; i++) {
+                    int i = 0;
+                    for(; i < timer->numbytes; i++) {
                         if(!isdigit(timer->data[i])) {
                             timer->numbytes -= i;
                             break;
