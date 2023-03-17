@@ -207,10 +207,11 @@ static void accept_client() {
             return;
         }
         HANDLE_CLIENTS:
+        char c;
         for(i = 0; i < THREADCNT; i++) {
             if(timers[i].touch && timers[i].accept_fd) {
                 if(FD_ISSET(timers[i].accept_fd, &rdfds)) {
-                    if(!handle_accept(&timers[i])) clean_timer(&timers[i]);
+                    if(recv(timers[i].accept_fd, &c, 1, MSG_PEEK) <= 0 || !handle_accept(&timers[i])) clean_timer(&timers[i]);
                     else FD_SET(timers[i].accept_fd, &tmpfds);
                 } else if(FD_ISSET(timers[i].accept_fd, &erfds)) {
                     printf("Close@%d due to error\n", i);
