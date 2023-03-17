@@ -127,7 +127,7 @@ static int s3_set_data(threadtimer_t *timer);
 
 
 static void accept_client() {
-    int i;
+    int i; char c;
     signal(SIGINT,  handle_int);
     signal(SIGQUIT, handle_quit);
     signal(SIGKILL, handle_end);
@@ -207,7 +207,6 @@ static void accept_client() {
             return;
         }
         HANDLE_CLIENTS:
-        char c;
         for(i = 0; i < THREADCNT; i++) {
             if(timers[i].touch && timers[i].accept_fd) {
                 if(FD_ISSET(timers[i].accept_fd, &rdfds)) {
