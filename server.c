@@ -549,7 +549,7 @@ static int s1_get(threadtimer_t *timer) {        //get kanban
                     timer->is_open = 0;
                     close_file(timer);
                     int r = send_all(kanban_path, timer);
-                    if(strnstr(timer->data, "quit", timer->numbytes)) {
+                    if(strstr(timer->data, "quit")) {
                         puts("Found last cmd is quit");
                         timer->numbytes = 0;
                         return 0;
@@ -567,7 +567,7 @@ static int s1_get(threadtimer_t *timer) {        //get kanban
         }
     }
     int r = close_file_and_send(timer, "null", 4);
-    if(strnstr(timer->data, "quit", timer->numbytes)) {
+    if(strstr(timer->data, "quit")) {
         puts("Found last cmd is quit");
         return 0;
     }
