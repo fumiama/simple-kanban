@@ -16,6 +16,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
+#include <ctype.h>
 #include <unistd.h>
 #include "config.h"
 
@@ -548,9 +549,16 @@ static int s1_get(threadtimer_t *timer) {        //get kanban
                     timer->is_open = 0;
                     close_file(timer);
                     int r = send_all(kanban_path, timer);
-                    if(!strncmp(timer->data, "quit", 4)) {
+                    if(strnstr(timer->data, "quit", timer->numbytes)) {
                         puts("Found last cmd is quit");
+                        timer->numbytes = 0;
                         return 0;
+                    }
+                    for(int i = 0; i < timer->numbytes; i++) {
+                        if(!isdigit(timer->data[i])) {
+                            timer->numbytes -= i;
+                            break;
+                        }
                     }
                     return r;
                 }
@@ -558,7 +566,7 @@ static int s1_get(threadtimer_t *timer) {        //get kanban
         }
     }
     int r = close_file_and_send(timer, "null", 4);
-    if(!strncmp(timer->data, "quit", 4)) {
+    if(strnstr(timer->data, "quit", timer->numbytes)) {
         puts("Found last cmd is quit");
         return 0;
     }
