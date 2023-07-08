@@ -31,8 +31,8 @@
 #endif
 
 
-static uint8_t _cfg[sizeof(SIMPLE_PB)+sizeof(config_t)];
-#define cfg ((const const_config_t*)(_cfg+sizeof(SIMPLE_PB)))        // 存储 pwd 和 sps
+static uint8_t _cfg[sizeof(simple_pb_t)+sizeof(config_t)];
+#define cfg ((const const_config_t*)(_cfg+sizeof(simple_pb_t)))        // 存储 pwd 和 sps
 
 static int fd;               // server socket fd
 
@@ -712,7 +712,7 @@ int main(int argc, char *argv[]) {
         perror(argv[as_daemon?5:4]);
         return 5;
     }
-    read_pb_into(fp, (SIMPLE_PB*)(&_cfg));
+    read_pb_into(fp, (simple_pb_t*)(&_cfg));
     fclose(fp);
     if(!(fd = bind_server(&port))) {
         return 6;

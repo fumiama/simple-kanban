@@ -20,7 +20,7 @@ int main() {
         puts("Check config...");
         fp = fopen("cfg.sp", "rb");
         if(fp) {
-            SIMPLE_PB* spb = get_pb(fp);
+            simple_pb_t* spb = get_pb(fp);
             memset(&cfg, 0, sizeof(config_t));
             memcpy(&cfg, spb->target, sizeof(config_t));
             printf("set pwd: %s, sps: %s\n", cfg.pwd, cfg.sps);
