@@ -24,15 +24,19 @@ struct sockaddr_in their_addr;
 pthread_t thread;
 uint32_t file_size;
 int recv_bin = 0;
+FILE* fp;
+
+static void __attribute__((destructor)) defer_close_fp() {
+    if (fp) fclose(fp);
+}
 
 void getMessage(void *p) {
     int c, i;
     while((c = recv(sockfd, bufr, BUFSIZ, 0)) > 0) {
         printf("Recv %u bytes: ", c);
         if(recv_bin) {
-            FILE* fp = fopen("dump.bin", "w+");
+            if(fp == NULL) fp = fopen("dump.bin", "w+");
             fwrite(bufr, c, 1, fp);
-            fclose(fp);
         } else for(i = 0; i < c; i++) putchar(bufr[i]);
         putchar('\n');
     }
