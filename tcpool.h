@@ -327,7 +327,8 @@ static void accept_client(int fd) {
     pthread_attr_init(&__tcpool_thread_attr);
     pthread_attr_setdetachstate(&__tcpool_thread_attr, PTHREAD_CREATE_DETACHED);
     TCPOOL_INIT_ACTION;
-    for(int i = 0; i < TCPOOL_THREADCNT; i++) {
+    int i = 0;
+    for(; i < TCPOOL_THREADCNT; i++) {
         pthread_rwlock_init(&tcpool_timers[i].mt, NULL);
         pthread_rwlock_init(&tcpool_timers[i].mb, NULL);
     }
@@ -390,7 +391,7 @@ static void accept_client(int fd) {
         } else {
             pthread_cond_init(&timer->c, NULL);
             pthread_mutex_init(&timer->mc, NULL);
-            if (pthread_create(&timer->thread, &__tcpool_thread_attr, (void (*)(void*))&handle_accept, timer)) {
+            if (pthread_create(&timer->thread, &__tcpool_thread_attr, (void* (*)(void*))&handle_accept, timer)) {
                 perror("Error creating thread");
                 cleanup_thread(timer);
                 putchar('\n');
@@ -405,7 +406,7 @@ static void accept_client(int fd) {
             pthread_cond_init(&timer->tc, NULL);
             pthread_mutex_init(&timer->tmc, NULL);
             timer->hastimerslept = 0;
-            if (pthread_create(&timer->timerthread, &__tcpool_thread_attr, (void (*)(void*))&accept_timer, timer)) {
+            if (pthread_create(&timer->timerthread, &__tcpool_thread_attr, (void* (*)(void*))&accept_timer, timer)) {
                 perror("Error creating timer thread");
                 cleanup_thread(timer);
                 putchar('\n');

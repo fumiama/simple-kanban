@@ -26,7 +26,8 @@ static inline off_t get_file_size(int isdata) {
 }
 
 static int init_file(char* file_path[2]) {
-    for (int i = 0; i < 2; i++) {
+    int i = 0;
+    for(; i < 2; i++) {
         FILE* fp = fopen(file_path[i], "rb+");
         if(!fp) {
             perror("Open file error");
