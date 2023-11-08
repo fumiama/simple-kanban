@@ -91,7 +91,7 @@ static int s3_set_data(tcpool_thread_timer_t *timer);
                         printf("<--- pass in %zd --->\n", (p)->numbytes); \
                     }
 static void accept_action(tcpool_thread_timer_t *p) {
-    if(send_data(p->accept_fd, "Welcome to simple kanban server. get", 36) <= 0) {
+    if(send_data(p->accept_fd, "Welcome to simple kanban server. ", 33) <= 0) {
         puts("Send banner to new client failed");
         return;
     }
@@ -229,6 +229,9 @@ static int s1_get(tcpool_thread_timer_t *timer) {
 
     uint32_t close_file_wrap_data[2] = {timer->index, (uint32_t)timer->isdata};
     int r; uint32_t ver, cli_ver;
+
+    r = send_data(timer->accept_fd, "get", 3);
+    if (!r) goto GET_END;
 
     pthread_cleanup_push((void (*)(void*))&close_file_wrap, (void*)close_file_wrap_data);
     timer->isdata = 0;
