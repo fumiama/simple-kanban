@@ -19,7 +19,7 @@ add_executable(cfgwriter cfgwriter.c)
 
 find_library(SPB_STATIC_LIB libspb.a)
 
-target_link_libraries(simple-kanban ${SPB_STATIC_LIB})
+target_link_libraries(simple-kanban pthread ${SPB_STATIC_LIB})
 target_link_libraries(simple-kanban-client pthread)
 target_link_libraries(cfgwriter ${SPB_STATIC_LIB})
 
