@@ -91,7 +91,7 @@ static int s3_set_data(tcpool_thread_timer_t *timer);
                         printf("<--- pass in %zd --->\n", (p)->numbytes); \
                     }
 static void accept_action(tcpool_thread_timer_t *p) {
-    if(send_data(p->accept_fd, "Welcome to simple kanban server.", 33) <= 0) {
+    if(send_data(p->accept_fd, "Welcome to simple kanban server. get", 36) <= 0) {
         puts("Send banner to new client failed");
         return;
     }
