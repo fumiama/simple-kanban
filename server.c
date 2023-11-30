@@ -13,6 +13,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/uio.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <ctype.h>
@@ -31,28 +32,43 @@
 static char *data_path;    // cat 命令读取的文件位置
 static char *kanban_path;  // get 命令读取的文件位置
 
+static file_cache_t data_file_cache;
+static file_cache_t kanban_file_cache;
+
 static uint8_t _cfg[sizeof(simple_pb_t)+sizeof(config_t)];
 #define cfg ((const const_config_t*)(_cfg+sizeof(simple_pb_t)))        // 存储 pwd 和 sps
 
 #define TCPOOL_THREAD_TIMER_T_SZ 65536
+
 #define TCPOOL_MAXWAITSEC 16
+
 #define SERVER_THREAD_BUFSZ ( \
     TCPOOL_THREAD_TIMER_T_SZ    \
     -TCPOOL_THREAD_TIMER_T_HEAD_SZ  \
     -sizeof(ssize_t)-2*sizeof(uint8_t)  \
 )
+
 #define TCPOOL_THREAD_CONTEXT   \
     ssize_t numbytes;   /* 本次接收的数据长度 */    \
     int8_t status;      /* 本会话所处的状态 */      \
     uint8_t isdata;     /* 是否为 datfile */       \
+    uint8_t isopen;     /* 是否获得了文件锁 */       \
     char data[SERVER_THREAD_BUFSZ]
-#define TCPOOL_TOUCH_TIMER_CONDITION (*(volatile uint32_t*)(is_file_opening))
-#define TCPOOL_INIT_ACTION init_file((char*[]){kanban_path, data_path})
+
+#define TCPOOL_TOUCH_TIMER_CONDITION 0
+
+#define TCPOOL_INIT_ACTION \
+    file_cache_init(&data_file_cache, data_path); \
+    file_cache_init(&kanban_file_cache, kanban_path);
+
 #define TCPOOL_PREHANDLE_ACCEPT_ACTION(timer)   \
     timer->status = -1; \
     timer->isdata = 0;
+
 #define TCPOOL_CLEANUP_THREAD_ACTION(timer) \
-    close_file(timer->index, timer->isdata);  \
+    if(timer->isopen) file_cache_unlock(timer->isdata?&data_file_cache:&kanban_file_cache); \
+    timer->isopen = 0; \
+    timer->isdata = 0; \
     timer->status = -1;
 
 #include "tcpool.h"
@@ -137,39 +153,32 @@ static int check_buffer(tcpool_thread_timer_t *timer) {
 }
 
 static int send_all(tcpool_thread_timer_t *timer) {
-    int re = 1;
-    FILE *fp = open_file(timer->index, timer->isdata, 1);
-    if(fp == NULL) return 1;
-    uint32_t close_file_wrap_data[2] = {timer->index, (uint32_t)timer->isdata};
-    pthread_cleanup_push((void (*)(void*))&close_file_wrap, (void*)close_file_wrap_data);
-    off_t len = 0, file_size = get_file_size(timer->isdata);
-    printf("Get file size: %d bytes, ", (int)file_size);
-    #if __APPLE__
-        #ifdef WORDS_BIGENDIAN
-            file_size = __DARWIN_OSSwapInt32(file_size);
-        #endif
-        struct sf_hdtr hdtr;
-        struct iovec headers;
-        headers.iov_base = &file_size;
-        headers.iov_len = sizeof(uint32_t);
-        hdtr.headers = &headers;
-        hdtr.hdr_cnt = 1;
-        hdtr.trailers = NULL;
-        hdtr.trl_cnt = 0;
-        re = !sendfile(fileno(fp), timer->accept_fd, 0, &len, &hdtr, 0);
-        if(!re) perror("sendfile");
-    #else
-        #ifdef WORDS_BIGENDIAN
-            uint32_t little_fs = __builtin_bswap32(file_size);
-            send(timer->accept_fd, &little_fs, sizeof(uint32_t), 0);
-        #else
-            send(timer->accept_fd, &file_size, sizeof(uint32_t), 0);
-        #endif
-        re = sendfile(timer->accept_fd, fileno(fp), &len, file_size) > 0;
-        if(!re) perror("sendfile");
+    int re;
+    file_cache_t* fc = timer->isdata?&data_file_cache:&kanban_file_cache;
+    if(file_cache_read_lock(fc)) {
+        return 0;
+    }
+    pthread_cleanup_push((void (*)(void*))&file_cache_unlock, (void*)fc);
+    uint64_t file_size = file_cache_get_data_size(fc);
+    printf("Get file size: %llu bytes, ", file_size);
+    #ifdef WORDS_BIGENDIAN
+        uint32_t little_fs = __builtin_bswap32(file_size);
     #endif
-    printf("Send %d bytes\n", (int)len);
+    struct iovec iov[2] = {
+        #ifdef WORDS_BIGENDIAN
+            {&little_fs, sizeof(uint32_t)},
+        #else
+            {&file_size, sizeof(uint32_t)},
+        #endif
+        {(void*)fc->data, file_size}
+    };
+    re = writev(timer->accept_fd, (const struct iovec *)&iov, 2);
     pthread_cleanup_pop(1);
+    if(re <= 0) {
+        perror("writev");
+        return 0;
+    }
+    printf("Send %d bytes\n", re);
     return re;
 }
 
@@ -223,26 +232,25 @@ static int s0_init(tcpool_thread_timer_t *timer) {
 
 // s1_get scan getxxx
 static int s1_get(tcpool_thread_timer_t *timer) {
-    FILE *fp = open_file(timer->index, 0, 1);
-    timer->status = 0;
-    if(!fp) goto GET_END;
-
+    file_cache_t* fc = timer->isdata?&data_file_cache:&kanban_file_cache;
     uint32_t close_file_wrap_data[2] = {timer->index, (uint32_t)timer->isdata};
     int r; uint32_t ver, cli_ver;
 
     r = send_data(timer->accept_fd, "get", 3);
     if (!r) goto GET_END;
-
-    pthread_cleanup_push((void (*)(void*))&close_file_wrap, (void*)close_file_wrap_data);
-    timer->isdata = 0;
-    r = fscanf(fp, "%u", &ver);
+    if(file_cache_read_lock(fc)) {
+        goto GET_END;
+    }
+    timer->status = 0;
+    pthread_cleanup_push((void (*)(void*))&file_cache_unlock, (void*)fc);
+    r = sscanf(fc->data, "%u", &ver);
     pthread_cleanup_pop(1);
 
     if(r <= 0) goto GET_END;
     if(sscanf(timer->data, "%u", &cli_ver) <= 0) goto GET_END;
     if(cli_ver >= ver) goto GET_END;
 
-    //need to send a new kanban
+    // need to send a new kanban
     r = send_all(timer);
     goto GET_SKIP;
 
@@ -282,13 +290,25 @@ static int s3_set_data(tcpool_thread_timer_t *timer) {
     char ret[4];
     *(uint32_t*)ret = *(uint32_t*)"succ";
     timer->status = 0;
-    FILE* fp = open_file(timer->index, timer->isdata, 0);
-    uint32_t close_file_wrap_data[2] = {timer->index, (uint32_t)timer->isdata};
-    pthread_cleanup_push((void (*)(void*))&close_file_wrap, (void*)close_file_wrap_data);
+    int recv_bufsz;
+    socklen_t optlen = sizeof(recv_bufsz);
+    if(getsockopt(timer->accept_fd, SOL_SOCKET, SO_RCVBUF, &recv_bufsz, &optlen)) {
+        perror("getsockopt");
+        *(uint32_t*)ret = *(uint32_t*)"erop";
+        goto S3_RETURN;
+    }
+    printf("Set recv buffer size: %d\n", recv_bufsz);
+    file_cache_t* fc = timer->isdata?&data_file_cache:&kanban_file_cache;
+    if(file_cache_write_lock(fc)) {
+        *(uint32_t*)ret = *(uint32_t*)"erwl";
+        goto S3_RETURN;
+    }
+    pthread_cleanup_push((void (*)(void*))&file_cache_unlock, (void*)fc);
     if(timer->numbytes < 4) {
         ssize_t n = recv(timer->accept_fd, timer->data+timer->numbytes, 4-timer->numbytes, MSG_WAITALL);
         if(n < 4-timer->numbytes) {
-            *(uint32_t*)ret = *(uint32_t*)"erro";
+            *(uint32_t*)ret = *(uint32_t*)"ercN";
+            perror("recv");
             goto S3_RETURN;
         }
     }
@@ -297,50 +317,53 @@ static int s3_set_data(tcpool_thread_timer_t *timer) {
     #else
         uint32_t file_size = *(uint32_t*)(timer->data);
     #endif
-    printf("Set data size: %u\n", file_size);
-    if((timer->numbytes = recv(timer->accept_fd, timer->data, SERVER_THREAD_BUFSZ, 0)) < 0 && errno != EAGAIN) {
-        *(uint32_t*)ret = *(uint32_t*)"erro";
+    printf("Client set data size: %u\n", file_size);
+    timer->numbytes -= 4;
+    if(file_cache_realloc(fc, (uint64_t)file_size)) {
+        *(uint32_t*)ret = *(uint32_t*)"eral";
         goto S3_RETURN;
     }
-    printf("Get data size: %d\n", (int)timer->numbytes);
-    if(file_size <= SERVER_THREAD_BUFSZ) {
-        while(timer->numbytes != file_size) {
-            ssize_t n = recv(timer->accept_fd, timer->data + timer->numbytes, SERVER_THREAD_BUFSZ - timer->numbytes, MSG_WAITALL);
-            if(n <= 0) {
-                *(uint32_t*)ret = *(uint32_t*)"erro";
+    if(timer->numbytes >= file_size) {
+        memcpy(fc->data, timer->data+4, file_size);
+        puts("All data received and copied");
+        goto S3_RETURN;
+    }
+    ssize_t recvlen = 0, p = 0;
+    if(timer->numbytes > 0) {
+        p = timer->numbytes;
+        memcpy(fc->data, timer->data+4, p);
+        file_size -= p;
+        printf("Copy received data: %zd bytes, remain: %u bytes\n", p, file_size);
+    }
+    if((uint64_t)file_size <= (uint64_t)recv_bufsz) {
+        if((recvlen = recv(timer->accept_fd, fc->data+p, (size_t)file_size, MSG_WAITALL)) != (ssize_t)file_size) {
+            *(uint32_t*)ret = *(uint32_t*)"ercA";
+            perror("recv");
+            goto S3_RETURN;
+        }
+        printf("Recv from client: %zd bytes\n", recvlen);
+    } else {
+        puts("Start loop recv");
+        while((recvlen = recv(
+                timer->accept_fd, fc->data+p,
+                (size_t)(((uint64_t)file_size>(uint64_t)recv_bufsz)?recv_bufsz:file_size), MSG_WAITALL)
+            ) > 0) {
+            if(recvlen <= 0 || (uint32_t)recvlen > file_size) {
+                *(uint32_t*)ret = *(uint32_t*)"ercM";
+                perror("recv");
                 goto S3_RETURN;
             }
-            timer->numbytes += n;
+            file_size -= (uint32_t)recvlen;
+            p += recvlen;
+            printf("Loop recv from client: %zd bytes, remain: %u bytes\n", recvlen, file_size);
+            if(file_size == 0) break;
         }
-        if(fwrite(timer->data, file_size, 1, fp) != 1) {
-            perror("fwrite");
-            *(uint32_t*)ret = *(uint32_t*)"erro";
-        }
-        goto S3_RETURN;
-    }
-    if(timer->numbytes > 0 && fwrite(timer->data, timer->numbytes, 1, fp) != 1) {
-        perror("fwrite");
-        *(uint32_t*)ret = *(uint32_t*)"erro";
-        goto S3_RETURN;
-    }
-    int32_t remain = file_size - timer->numbytes;
-    while(remain > 0) {
-        // printf("remain:%d\n", (int)remain);
-        ssize_t n = recv(timer->accept_fd, timer->data, (remain>SERVER_THREAD_BUFSZ)?SERVER_THREAD_BUFSZ:remain, MSG_WAITALL);
-        if(n < 0) {
-            *(uint32_t*)ret = *(uint32_t*)"erro";
+        if(recvlen <= 0) {
+            *(uint32_t*)ret = *(uint32_t*)"ercF";
+            perror("recv");
             goto S3_RETURN;
         }
-        else if(!n) {
-            usleep(10000); // 10 ms
-            continue;
-        }
-        if(fwrite(timer->data, n, 1, fp) != 1) {
-            perror("fwrite");
-            *(uint32_t*)ret = *(uint32_t*)"erro";
-            goto S3_RETURN;
-        }
-        remain -= n;
+        puts("Finish loop recv");
     }
 S3_RETURN:
     pthread_cleanup_pop(1);
@@ -401,4 +424,9 @@ int main(int argc, char *argv[]) {
     accept_client(tmp);
     pthread_cleanup_pop(1);
     return 99;
+}
+
+static void __attribute__((destructor)) defer_close_cache_files() {
+    file_cache_close(&data_file_cache);
+    file_cache_close(&kanban_file_cache);
 }

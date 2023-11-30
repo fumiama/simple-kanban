@@ -88,22 +88,22 @@ int main(int argc,char *argv[]) {   //usage: ./client host port
                         hdtr.trailers = NULL;
                         hdtr.trl_cnt = 0;
                         if(!sendfile(fileno(fp), sockfd, 0, &len, &hdtr, 0)) puts("Send file success.");
-                        else puts("Send file error.");
+                        else perror("sendfile");
                     #else
                         send(sockfd, &file_size, sizeof(uint32_t), 0);
                         if(!sendfile(sockfd, fileno(fp), &len, file_size)) puts("Send file success.");
-                        else puts("Send file error.");
+                        else perror("sendfile");
                     #endif
                     fclose(fp);
-                    printf("Send count:%d\n", (int)len);
-                } else puts("Open file error!");
+                    printf("Send count: %d\n", (int)len);
+                } else perror("fopen");
             } else {
                 send(sockfd, buf, strlen(buf), 0);
                 if(!strcmp(buf, "quit")) exit(EXIT_SUCCESS);
             }
             sleep(1);
         }
-    } else perror("Create msg thread failed");
+    } else perror("pthread_create");
     close(sockfd);
     return 0;
 }

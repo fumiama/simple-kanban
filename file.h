@@ -3,97 +3,151 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <unistd.h>
 
-static char* file_filepath[2];
+// FILE_CACHE_MAX_SIZE 1G
+#define FILE_CACHE_MAX_SIZE (1024*1024*1024)
 
-static volatile uint16_t has_file_opened[2];
-static volatile uint16_t is_file_opening[2];
-static volatile uint32_t file_owner_index[2] = {(uint32_t)-1, (uint32_t)-1};
+struct file_cache_t {
+    pthread_rwlock_t mu;
+    char const *path;
+    char *data;
+    size_t size;
+};
+typedef struct file_cache_t file_cache_t;
 
-static FILE* file_fp[2];
-static pthread_rwlock_t mu[2];
-
-static inline off_t get_file_size(int isdata) {
-    struct stat statbuf;
-    if(stat(file_filepath[!!isdata], &statbuf)==0) {
-        return statbuf.st_size;
+int file_cache_init(file_cache_t* fc, char* path) {
+    static int page_size;
+    int fd;
+    struct stat sb;
+    char* mapped;
+    if(page_size <= 0) page_size = (int)sysconf(_SC_PAGE_SIZE);
+    if(pthread_rwlock_init(&fc->mu, NULL)) {
+        perror("pthread_rwlock_init");
+        return -1;
     }
-    return -1;
-}
-
-static int init_file(char* file_path[2]) {
-    int i = 0;
-    for(; i < 2; i++) {
-        FILE* fp = fopen(file_path[i], "rb+");
-        if(!fp) {
-            perror("Open file error");
-            return 2;
-        }
-        int err = pthread_rwlock_init(&mu[i], NULL);
-        if(err) {
-            perror("Init lock error");
-            return 1;
-        }
-        file_filepath[i] = file_path[i];
-        fclose(fp);
+    fd = open(path, O_RDWR|O_CREAT);
+    if(fd < 0) {
+        perror("open");
+        return -2;
     }
+    if(fstat(fd, &sb) < 0) {
+        perror("fstat");
+        return -3;
+    }
+    if(sb.st_size < page_size) {
+        if(ftruncate(fd, page_size) < 0) {
+            perror("ftruncate");
+            return -4;
+        }
+    }
+    mapped = mmap(NULL, (size_t)sb.st_size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
+    close(fd);
+    if(mapped == MAP_FAILED) {
+        perror("mmap");
+        return -5;
+    }
+    fc->path = path;
+    fc->data = mapped+sizeof(uint64_t);
+    fc->size = (size_t)sb.st_size;
     return 0;
 }
 
-static inline FILE* open_file(uint32_t index, int isdata, int isro) {
-    isdata = !!isdata;
-    is_file_opening[isdata] = 1;
-    if(pthread_rwlock_wrlock(&mu[isdata])) {
-        perror("Open file: Writelock busy");
-        is_file_opening[isdata] = 0;
-        return NULL;
-    }
-    is_file_opening[isdata] = 0;
-    file_fp[isdata] = fopen(file_filepath[isdata], isro?"rb":"rb+");
-    if(!file_fp[isdata]) {
-        perror("Open file: fopen");
-        pthread_rwlock_unlock(&mu[isdata]);
-        return NULL;
-    }
-    has_file_opened[isdata] = 1;
-    file_owner_index[isdata] = index;
-    puts("Open file");
-    return file_fp[isdata];
+uint64_t file_cache_get_data_size(file_cache_t* fc) {
+    #ifdef WORDS_BIGENDIAN
+        return __builtin_bswap64(*(uint64_t*)(fc->data - sizeof(uint64_t)));
+    #else
+        return *(uint64_t*)(fc->data - sizeof(uint64_t));
+    #endif
 }
 
-static inline int require_shared_lock(int isdata) {
-    if(pthread_rwlock_rdlock(&mu[!!isdata])) {
-        perror("Open file: Readlock busy");
+void file_cache_set_data_size(file_cache_t* fc, uint64_t size) {
+    #ifdef WORDS_BIGENDIAN
+        *(uint64_t*)(fc->data - sizeof(uint64_t)) = __builtin_bswap64(size);
+    #else
+        *(uint64_t*)(fc->data - sizeof(uint64_t)) = size;
+    #endif
+}
+
+int file_cache_read_lock(file_cache_t* fc) {
+    if(pthread_rwlock_rdlock(&fc->mu)) {
+        perror("pthread_rwlock_rdlock");
         return 1;
     }
-    puts("Shared lock required");
+    puts("file_cache_read_lock: obtained");
     return 0;
 }
 
-static inline void release_shared_lock(int isdata) {
-    pthread_rwlock_unlock(&mu[!!isdata]);
-    puts("Release shared lock");
+int file_cache_write_lock(file_cache_t* fc) {
+    if(pthread_rwlock_wrlock(&fc->mu)) {
+        perror("pthread_rwlock_wrlock");
+        return 1;
+    }
+    puts("file_cache_write_lock: obtained");
+    return 0;
 }
 
-static inline void close_file(uint32_t index, int isdata) {
-    isdata = !!isdata;
-    if(index != file_owner_index[isdata]) return;
-    if(has_file_opened[isdata]) {
-        fclose(file_fp[isdata]);
-        file_fp[isdata] = NULL;
-        has_file_opened[isdata] = 0;
-        file_owner_index[isdata] = (uint32_t)-1;
-        pthread_rwlock_unlock(&mu[isdata]);
-        puts("Close file");
-    } else puts("file already closed");
+int file_cache_unlock(file_cache_t* fc) {
+    if(pthread_rwlock_unlock(&fc->mu)) {
+        perror("file_cache_unlock");
+        return 1;
+    }
+    puts("file_cache_unlock: success");
+    return 0;
 }
 
-static void close_file_wrap(uint32_t index_isdata[2]) {
-    close_file(index_isdata[0], (int)index_isdata[1]);
+// file_cache_realloc must be used after obtaining write lock
+int file_cache_realloc(file_cache_t* fc, uint64_t newsize) {
+    if(newsize > FILE_CACHE_MAX_SIZE) {
+        printf("file_cache_realloc: too big size %llu\n", newsize);
+        return -1;
+    }
+    if(newsize <= fc->size - sizeof(uint64_t)) {
+        file_cache_set_data_size(fc, newsize);
+        printf("file_cache_realloc: new data size %llu bytes (fast)\n", newsize);
+        return 0;
+    }
+    if(munmap(fc->data - sizeof(uint64_t), fc->size) < 0) {
+        perror("munmap");
+        return -2;
+    }
+    int fd = open(fc->path, O_RDWR|O_CREAT);
+    if(fd < 0) {
+        perror("open");
+        return -3;
+    }
+    fc->size = (size_t)newsize + sizeof(uint64_t);
+    if(ftruncate(fd, fc->size) < 0) {
+        perror("ftruncate");
+        return -4;
+    }
+    fc->data = mmap(NULL, fc->size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
+    close(fd);
+    if(fc->data == MAP_FAILED) {
+        perror("mmap");
+        return -5;
+    }
+    fc->data += sizeof(uint64_t);
+    file_cache_set_data_size(fc, newsize);
+    printf("file_cache_realloc: new data size %llu bytes\n", newsize);
+    return 0;
+}
+
+int file_cache_close(file_cache_t* fc) {
+    if(munmap(fc->data - sizeof(uint64_t), fc->size) < 0) {
+        perror("munmap");
+        return -1;
+    }
+    if(pthread_rwlock_destroy(&fc->mu)) {
+        perror("pthread_rwlock_destroy");
+        return -2;
+    }
+    return 0;
 }
 
 #endif
