@@ -31,7 +31,7 @@ int file_cache_init(file_cache_t* fc, char* path) {
         perror("pthread_rwlock_init");
         return -1;
     }
-    fd = open(path, O_RDWR|O_CREAT);
+    fd = open(path, O_RDWR|O_CREAT, 0644);
     if(fd < 0) {
         perror("open");
         return -2;
@@ -45,6 +45,7 @@ int file_cache_init(file_cache_t* fc, char* path) {
             perror("ftruncate");
             return -4;
         }
+        sb.st_size = page_size;
     }
     mapped = mmap(NULL, (size_t)sb.st_size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
     close(fd);
