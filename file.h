@@ -38,11 +38,13 @@ int file_cache_init(file_cache_t* fc, char* path) {
     }
     if(fstat(fd, &sb) < 0) {
         perror("fstat");
+        close(fd);
         return -3;
     }
     if(sb.st_size < page_size) {
         if(ftruncate(fd, page_size) < 0) {
             perror("ftruncate");
+            close(fd);
             return -4;
         }
         sb.st_size = page_size;
@@ -125,6 +127,7 @@ int file_cache_realloc(file_cache_t* fc, uint64_t newsize) {
     fc->size = (size_t)newsize + sizeof(uint64_t);
     if(ftruncate(fd, fc->size) < 0) {
         perror("ftruncate");
+        close(fd);
         return -4;
     }
     fc->data = mmap(NULL, fc->size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
