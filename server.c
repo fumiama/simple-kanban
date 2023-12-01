@@ -296,13 +296,13 @@ static int s3_set_data(tcpool_thread_timer_t *timer) {
     if(getsockopt(timer->accept_fd, SOL_SOCKET, SO_RCVBUF, &recv_bufsz, &optlen)) {
         perror("getsockopt");
         *(uint32_t*)ret = *(uint32_t*)"erop";
-        goto S3_RETURN;
+        goto S3_SKIP;
     }
     printf("Set recv buffer size: %d\n", recv_bufsz);
     file_cache_t* fc = timer->isdata?&data_file_cache:&kanban_file_cache;
     if(file_cache_write_lock(fc)) {
         *(uint32_t*)ret = *(uint32_t*)"erwl";
-        goto S3_RETURN;
+        goto S3_SKIP;
     }
     pthread_cleanup_push((void (*)(void*))&file_cache_unlock, (void*)fc);
     if(timer->numbytes < 4) {
@@ -359,6 +359,7 @@ static int s3_set_data(tcpool_thread_timer_t *timer) {
     puts("Finish loop recv");
 S3_RETURN:
     pthread_cleanup_pop(1);
+S3_SKIP:
     return send_data(timer->accept_fd, ret, 4);
 }
 
