@@ -38,10 +38,6 @@ static file_cache_t kanban_file_cache;
 static uint8_t _cfg[sizeof(simple_pb_t)+sizeof(config_t)];
 #define cfg ((const const_config_t*)(_cfg+sizeof(simple_pb_t)))        // 存储 pwd 和 sps
 
-#define TCPOOL_THREAD_TIMER_T_SZ 65536
-
-#define TCPOOL_MAXWAITSEC 16
-
 #define SERVER_THREAD_BUFSZ ( \
     TCPOOL_THREAD_TIMER_T_SZ    \
     -TCPOOL_THREAD_TIMER_T_HEAD_SZ  \
@@ -55,7 +51,7 @@ static uint8_t _cfg[sizeof(simple_pb_t)+sizeof(config_t)];
     uint8_t isopen;     /* 是否获得了文件锁 */       \
     char data[SERVER_THREAD_BUFSZ]
 
-#define TCPOOL_TOUCH_TIMER_CONDITION 0
+#define TCPOOL_TOUCH_TIMER_CONDITION (is_sending_all[index])
 
 #define TCPOOL_INIT_ACTION \
     file_cache_init(&data_file_cache, data_path); \
@@ -69,9 +65,12 @@ static uint8_t _cfg[sizeof(simple_pb_t)+sizeof(config_t)];
     if(timer->isopen) file_cache_unlock(timer->isdata?&data_file_cache:&kanban_file_cache); \
     timer->isopen = 0; \
     timer->isdata = 0; \
+    is_sending_all[timer->index] = 0; \
     timer->status = -1;
 
 #include "tcpool.h"
+
+static volatile uintptr_t is_sending_all[TCPOOL_THREADCNT];
 
 
 /*
@@ -172,7 +171,9 @@ static int send_all(tcpool_thread_timer_t *timer) {
         #endif
         {(void*)fc->data, file_size}
     };
+    is_sending_all[timer->index] = 1;
     re = writev(timer->accept_fd, (const struct iovec *)&iov, 2);
+    is_sending_all[timer->index] = 0;
     pthread_cleanup_pop(1);
     if(re <= 0) {
         perror("writev");

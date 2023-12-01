@@ -13,4 +13,8 @@ struct const_config_t {
 };
 typedef struct const_config_t const_config_t;
 
+#define TCPOOL_THREAD_TIMER_T_SZ 65536
+
+#define TCPOOL_MAXWAITSEC 16
+
 #endif
