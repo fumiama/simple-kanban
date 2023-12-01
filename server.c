@@ -335,37 +335,28 @@ static int s3_set_data(tcpool_thread_timer_t *timer) {
         memcpy(fc->data, timer->data+4, p);
         file_size -= p;
         printf("Copy received data: %zd bytes, remain: %u bytes\n", p, file_size);
-    }
-    if((uint64_t)file_size <= (uint64_t)recv_bufsz) {
-        if((recvlen = recv(timer->accept_fd, fc->data+p, (size_t)file_size, MSG_WAITALL)) != (ssize_t)file_size) {
-            *(uint32_t*)ret = *(uint32_t*)"ercA";
+    }   
+    puts("Start loop recv");
+    while((recvlen = recv(
+            timer->accept_fd, fc->data+p,
+            (size_t)(((uint64_t)file_size>(uint64_t)recv_bufsz)?recv_bufsz:file_size), 0)
+        ) > 0) {
+        if(recvlen <= 0 || (uint32_t)recvlen > file_size) {
+            *(uint32_t*)ret = *(uint32_t*)"ercM";
             perror("recv");
             goto S3_RETURN;
         }
-        printf("Recv from client: %zd bytes\n", recvlen);
-    } else {
-        puts("Start loop recv");
-        while((recvlen = recv(
-                timer->accept_fd, fc->data+p,
-                (size_t)(((uint64_t)file_size>(uint64_t)recv_bufsz)?recv_bufsz:file_size), MSG_WAITALL)
-            ) > 0) {
-            if(recvlen <= 0 || (uint32_t)recvlen > file_size) {
-                *(uint32_t*)ret = *(uint32_t*)"ercM";
-                perror("recv");
-                goto S3_RETURN;
-            }
-            file_size -= (uint32_t)recvlen;
-            p += recvlen;
-            printf("Loop recv from client: %zd bytes, remain: %u bytes\n", recvlen, file_size);
-            if(file_size == 0) break;
-        }
-        if(recvlen <= 0) {
-            *(uint32_t*)ret = *(uint32_t*)"ercF";
-            perror("recv");
-            goto S3_RETURN;
-        }
-        puts("Finish loop recv");
+        file_size -= (uint32_t)recvlen;
+        p += recvlen;
+        printf("Loop recv from client: %zd bytes, remain: %u bytes\n", recvlen, file_size);
+        if(file_size == 0) break;
     }
+    if(recvlen <= 0) {
+        *(uint32_t*)ret = *(uint32_t*)"ercF";
+        perror("recv");
+        goto S3_RETURN;
+    }
+    puts("Finish loop recv");
 S3_RETURN:
     pthread_cleanup_pop(1);
     return send_data(timer->accept_fd, ret, 4);
