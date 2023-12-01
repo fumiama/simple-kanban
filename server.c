@@ -45,7 +45,7 @@ static uint8_t _cfg[sizeof(simple_pb_t)+sizeof(config_t)];
 #define SERVER_THREAD_BUFSZ ( \
     TCPOOL_THREAD_TIMER_T_SZ    \
     -TCPOOL_THREAD_TIMER_T_HEAD_SZ  \
-    -sizeof(ssize_t)-2*sizeof(uint8_t)  \
+    -sizeof(ssize_t)-3*sizeof(uint8_t)  \
 )
 
 #define TCPOOL_THREAD_CONTEXT   \
