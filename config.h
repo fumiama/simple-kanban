@@ -17,4 +17,6 @@ typedef struct const_config_t const_config_t;
 
 #define TCPOOL_MAXWAITSEC 16
 
+#define TCPOOL_THREADCNT 32
+
 #endif

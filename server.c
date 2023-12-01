@@ -51,6 +51,8 @@ static uint8_t _cfg[sizeof(simple_pb_t)+sizeof(config_t)];
     uint8_t isopen;     /* 是否获得了文件锁 */       \
     char data[SERVER_THREAD_BUFSZ]
 
+static volatile uintptr_t is_sending_all[TCPOOL_THREADCNT];
+
 #define TCPOOL_TOUCH_TIMER_CONDITION (is_sending_all[index])
 
 #define TCPOOL_INIT_ACTION \
@@ -69,8 +71,6 @@ static uint8_t _cfg[sizeof(simple_pb_t)+sizeof(config_t)];
     timer->status = -1;
 
 #include "tcpool.h"
-
-static volatile uintptr_t is_sending_all[TCPOOL_THREADCNT];
 
 
 /*
