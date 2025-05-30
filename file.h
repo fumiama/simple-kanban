@@ -143,6 +143,7 @@ int file_cache_realloc(file_cache_t* fc, uint64_t newsize) {
 }
 
 int file_cache_close(file_cache_t* fc) {
+    if(!fc->data) return 0;
     if(munmap(fc->data - sizeof(uint64_t), fc->size) < 0) {
         perror("munmap");
         return -1;
