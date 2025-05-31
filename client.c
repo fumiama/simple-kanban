@@ -20,7 +20,11 @@
 int sockfd;
 char buf[BUFSIZ];
 char bufr[BUFSIZ];
-struct sockaddr_in their_addr;
+#ifdef LISTEN_ON_IPV6
+    struct sockaddr_in6 their_addr;
+#else
+    struct sockaddr_in their_addr;
+#endif
 pthread_t thread;
 uint32_t file_size;
 int recv_bin = 0;
@@ -51,14 +55,36 @@ off_t size_of_file(const char* fname) {
 int main(int argc,char *argv[]) {   //usage: ./client host port
     ssize_t numbytes;
     puts("break!");
-    while((sockfd = socket(AF_INET,SOCK_STREAM,0)) == -1);
+    #ifdef LISTEN_ON_IPV6
+        if((sockfd = socket(PF_INET6,SOCK_STREAM,0)) < 0) {
+            perror("socket");
+            return 1;
+        }
+    #else
+        if((sockfd = socket(PF_INET,SOCK_STREAM,0)) < 0) {
+            perror("socket");
+            return 1;
+        }
+    #endif
     puts("Get sockfd");
-    their_addr.sin_family = AF_INET;
-    their_addr.sin_port = htons(atoi(argv[2]));
-    their_addr.sin_addr.s_addr=inet_addr(argv[1]);
-    bzero(&(their_addr.sin_zero), 8);
-    
-    while(connect(sockfd,(struct sockaddr*)&their_addr,sizeof(struct sockaddr)) == -1);
+    #ifdef LISTEN_ON_IPV6
+        their_addr.sin6_family = AF_INET6;
+        their_addr.sin6_port = htons(atoi(argv[2]));
+        if(inet_pton(AF_INET6, argv[1], &their_addr.sin6_addr) != 1) {
+            perror("inet_pton");
+            return 1;
+        }
+    #else
+        their_addr.sin_family = AF_INET;
+        their_addr.sin_port = htons(atoi(argv[2]));
+        their_addr.sin_addr.s_addr=inet_addr(argv[1]);
+        bzero(&(their_addr.sin_zero), 8);
+    #endif
+    puts("Connecting...");
+    while(connect(sockfd,(struct sockaddr*)&their_addr,sizeof(their_addr)) < 0) {
+        perror("connect");
+        sleep(1);
+    }
     puts("Connected to server");
     numbytes = recv(sockfd, buf, BUFSIZ,0);
     buf[numbytes]='\0';  
